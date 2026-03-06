@@ -46,6 +46,9 @@ public class Result {
     @Builder.Default
     private Integer outputTokens = 0;
 
+    @Column(nullable = false, length = 50)
+    private String model;
+
     @Column(columnDefinition = "TEXT")
     private String errorMessage;
 

@@ -52,14 +52,17 @@ public class JobController {
     @GetMapping("/{jobId}")
     public ApiResponse<JobDetailResponse> getJob(@PathVariable("jobId") Long jobId) {
         Job job = jobRepository.findById(jobId).orElseThrow();
-        
+
         List<Result> results = resultRepository.findByJobId(jobId);
         int inputTokens = results.stream().mapToInt(Result::getInputTokens).sum();
         int outputTokens = results.stream().mapToInt(Result::getOutputTokens).sum();
-        
-        // 각 결과의 모델을 알 수 없으므로 Job의 기본 모델 사용 혹은 Result에 모델 정보 추가 필요하나
-        // 기존 엔티티를 수정하지 않기로 했으므로 Job 레벨에서 계산
-        double estimatedCost = tokenEstimator.estimateCost(inputTokens, job.getModel());
+
+        // 모델별 비용 합산
+        double estimatedCost = results.stream()
+                .collect(Collectors.groupingBy(Result::getModel, Collectors.summingInt(Result::getInputTokens)))
+                .entrySet().stream()
+                .mapToDouble(e -> tokenEstimator.estimateCost(e.getValue(), e.getKey()))
+                .sum();
 
         List<JobDetailResponse.ChunkDetail> chunks = job.getChunks().stream()
                 .map(c -> JobDetailResponse.ChunkDetail.builder()
@@ -67,8 +70,8 @@ public class JobController {
                         .model(c.getModel())
                         .batchId(c.getExternalBatchId())
                         .totalRows(c.getRowCount())
-                        .completedRows(c.getResults().size()) // 대략적인 수치
-                        .failedRows(0) // 상세 로직 생략
+                        .completedRows((int) c.getResults().stream().filter(r -> r.getStatus() == Result.ResultStatus.SUCCESS).count())
+                        .failedRows((int) c.getResults().stream().filter(r -> r.getStatus() == Result.ResultStatus.FAIL).count())
                         .status(c.getStatus().name().toLowerCase())
                         .build())
                 .collect(Collectors.toList());
@@ -98,12 +101,27 @@ public class JobController {
         List<Result> results = resultRepository.findByJobId(job.getId());
         int inputTokens = results.stream().mapToInt(Result::getInputTokens).sum();
         int outputTokens = results.stream().mapToInt(Result::getOutputTokens).sum();
-        double estimatedCost = tokenEstimator.estimateCost(inputTokens, job.getModel());
+
+        // 모델별 비용 합산
+        double estimatedCost = results.stream()
+                .collect(Collectors.groupingBy(Result::getModel, Collectors.summingInt(Result::getInputTokens)))
+                .entrySet().stream()
+                .mapToDouble(e -> tokenEstimator.estimateCost(e.getValue(), e.getKey()))
+                .sum();
+
+        List<String> models = results.stream()
+                .map(Result::getModel)
+                .distinct()
+                .collect(Collectors.toList());
+
+        if (models.isEmpty()) {
+            models = List.of(job.getModel());
+        }
 
         return JobListResponse.JobInfo.builder()
                 .jobId(job.getId().toString())
                 .filename(job.getName())
-                .models(List.of(job.getModel()))
+                .models(models)
                 .totalRows(job.getTotalRows())
                 .completedRows(job.getCompletedRows())
                 .status(job.getStatus().name().toLowerCase())

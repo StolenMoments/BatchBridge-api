@@ -53,6 +53,7 @@ public class EntityMappingTest {
                 .chunk(chunk)
                 .rowIdentifier("row-1")
                 .prompt("Hello AI")
+                .model("claude-3-5-sonnet-20241022")
                 .status(Result.ResultStatus.SUCCESS)
                 .resultText("Hello Human")
                 .build();

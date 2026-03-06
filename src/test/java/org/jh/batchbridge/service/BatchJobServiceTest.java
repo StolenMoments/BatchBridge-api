@@ -272,8 +272,10 @@ class BatchJobServiceTest {
         Job job = Job.builder().id(jobId).name("test-job").build();
         Chunk chunk = Chunk.builder().id(10L).job(job).model("claude-3-5-sonnet").build();
         Result result = Result.builder()
+                .id(100L)
                 .rowIdentifier("row-1")
                 .prompt("test prompt")
+                .model("claude-3-5-sonnet")
                 .chunk(chunk)
                 .resultText("result text")
                 .status(Result.ResultStatus.SUCCESS)
@@ -290,7 +292,8 @@ class BatchJobServiceTest {
         // then
         assertThat(mergedResults).hasSize(1);
         MergedResultDto dto = mergedResults.get(0);
-        assertThat(dto.getId()).isEqualTo("row-1");
+        assertThat(dto.getRowId()).isEqualTo("100");
+        assertThat(dto.getCustomId()).isEqualTo("row-1");
         assertThat(dto.getPrompt()).isEqualTo("test prompt");
         assertThat(dto.getModel()).isEqualTo("claude-3-5-sonnet");
         assertThat(dto.getResultText()).isEqualTo("result text");
@@ -307,15 +310,19 @@ class BatchJobServiceTest {
         Job job = Job.builder().id(jobId).name("test-job").build();
         Chunk chunk = Chunk.builder().id(10L).job(job).model("claude-3-5-sonnet").build();
         Result successResult = Result.builder()
+                .id(101L)
                 .rowIdentifier("row-success")
                 .prompt("success prompt")
+                .model("claude-3-5-sonnet")
                 .chunk(chunk)
                 .resultText("result text")
                 .status(Result.ResultStatus.SUCCESS)
                 .build();
         Result failResult = Result.builder()
+                .id(102L)
                 .rowIdentifier("row-fail")
                 .prompt("fail prompt")
+                .model("claude-3-5-sonnet")
                 .chunk(chunk)
                 .resultText(null)
                 .status(Result.ResultStatus.FAIL)
@@ -332,8 +339,8 @@ class BatchJobServiceTest {
         // then
         String[] lines = csvContent.split("\n");
         assertThat(lines).hasSize(2); // Header + 1 Fail Row
-        assertThat(lines[0]).contains("id", "prompt", "result", "model", "input_tokens", "output_tokens", "status");
-        assertThat(lines[1]).contains("row-fail", "fail prompt", "claude-3-5-sonnet", "FAIL");
+        assertThat(lines[0]).contains("row_id", "custom_id", "prompt", "result", "model", "input_tokens", "output_tokens", "status");
+        assertThat(lines[1]).contains("102", "row-fail", "fail prompt", "claude-3-5-sonnet", "FAIL");
         assertThat(csvContent).doesNotContain("row-success");
     }
 }

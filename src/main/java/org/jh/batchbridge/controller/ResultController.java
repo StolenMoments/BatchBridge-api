@@ -51,10 +51,16 @@ public class ResultController {
     public ApiResponse<ReportResponse> getReport(@PathVariable("jobId") Long jobId) {
         Job job = jobRepository.findById(jobId).orElseThrow();
         List<Result> results = resultRepository.findByJobId(jobId);
-        
+
         int totalInputTokens = results.stream().mapToInt(Result::getInputTokens).sum();
         int totalOutputTokens = results.stream().mapToInt(Result::getOutputTokens).sum();
-        double totalCost = tokenEstimator.estimateCost(totalInputTokens, job.getModel());
+
+        // 모델별 비용 합산
+        double totalCost = results.stream()
+                .collect(Collectors.groupingBy(Result::getModel, Collectors.summingInt(Result::getInputTokens)))
+                .entrySet().stream()
+                .mapToDouble(e -> tokenEstimator.estimateCost(e.getValue(), e.getKey()))
+                .sum();
 
         ReportResponse.Summary summary = ReportResponse.Summary.builder()
                 .totalRows(job.getTotalRows())
@@ -65,11 +71,11 @@ public class ResultController {
                 .totalCost(totalCost)
                 .build();
 
-        // 모델별 집계 (Job 엔티티 구조상 단일 모델일 가능성이 높으나, Chunk별로 나뉠 수 있음)
-        Map<String, List<Result>> byModel = results.stream()
-                .collect(Collectors.groupingBy(r -> r.getChunk().getModel()));
+        // 모델별 집계
+        Map<String, List<Result>> byModelGroup = results.stream()
+                .collect(Collectors.groupingBy(Result::getModel));
 
-        List<ReportResponse.ModelReport> modelReports = byModel.entrySet().stream()
+        List<ReportResponse.ModelReport> modelReports = byModelGroup.entrySet().stream()
                 .map(entry -> {
                     String model = entry.getKey();
                     List<Result> modelResults = entry.getValue();

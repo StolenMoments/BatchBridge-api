@@ -12,7 +12,8 @@ import lombok.Setter;
 @NoArgsConstructor
 @AllArgsConstructor
 public class MergedResultDto {
-    private String id;
+    private String rowId;
+    private String customId;
     private String prompt;
     private String model;
     private String resultText;

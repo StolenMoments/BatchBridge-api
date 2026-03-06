@@ -40,14 +40,14 @@ public class BatchController {
                 .orElseThrow(() -> new IllegalArgumentException("Unsupported file format"));
 
         List<BatchRowDto> rows = parser.parse(file.getInputStream());
-        
-        // 업로드 시점에는 DB에 저장하지 않고 미리보기 정보만 반환하라고 되어 있으나, 
-        // /batches 에서 uploadId를 사용하므로 임시 저장이 필요할 수 있음. 
-        // 여기서는 BatchJobService.createJobFromUpload 를 사용하여 Job을 생성(PENDING 상태)하고 그 ID를 uploadId로 사용함.
-        Job job = batchJobService.createJobFromUpload(file, defaultModel);
-        
+
+        // 업로드 시점에는 DB에 저장하지 않고 미리보기 정보만 반환하라고 되어 있으나,
+        // /batches 에서 uploadId를 사용하므로 임시 저장이 필요함.
+        // 여기서는 BatchJobService.createJobFromFile 를 사용하여 Job을 생성(PENDING 상태)하고 그 ID를 uploadId로 사용함.
+        Job job = batchJobService.createJobFromFile(file.getOriginalFilename(), file.getInputStream(), defaultModel);
+
         Map<String, List<BatchRowDto>> grouped = batchJobService.groupRowsByModel(rows, defaultModel);
-        
+
         Map<String, Integer> estimatedTokens = new HashMap<>();
         Map<String, Double> estimatedCosts = new HashMap<>();
         double totalCost = 0;
@@ -66,7 +66,7 @@ public class BatchController {
                 .uploadId(job.getId().toString())
                 .filename(file.getOriginalFilename())
                 .totalRows(rows.size())
-                .columns(Arrays.asList("id", "prompt", "model", "system_prompt"))
+                .columns(Arrays.asList("custom_id", "prompt", "model", "system_prompt"))
                 .preview(rows.stream().limit(5).collect(Collectors.toList()))
                 .estimatedTokens(estimatedTokens)
                 .estimatedCost(estimatedCosts)

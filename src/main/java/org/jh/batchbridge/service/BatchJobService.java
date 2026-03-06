@@ -128,6 +128,7 @@ public class BatchJobService {
                             .chunk(savedChunk)
                             .rowIdentifier(row.getId())
                             .prompt(row.getPrompt())
+                            .model(model)
                             .status(Result.ResultStatus.PENDING)
                             .inputTokens(0)
                             .outputTokens(0)
@@ -327,9 +328,10 @@ public class BatchJobService {
 
         return results.stream()
                 .map(r -> MergedResultDto.builder()
-                        .id(r.getRowIdentifier())
+                        .rowId(r.getId().toString())
+                        .customId(r.getRowIdentifier())
                         .prompt(r.getPrompt())
-                        .model(r.getChunk().getModel())
+                        .model(r.getModel())
                         .resultText(r.getResultText())
                         .status(r.getStatus().name())
                         .inputTokens(r.getInputTokens())
@@ -364,12 +366,13 @@ public class BatchJobService {
              java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(out, java.nio.charset.StandardCharsets.UTF_8);
              com.opencsv.CSVWriter csvWriter = new com.opencsv.CSVWriter(writer)) {
 
-            // Header: id, prompt, result, model, input_tokens, output_tokens, status
-            csvWriter.writeNext(new String[]{"id", "prompt", "result", "model", "input_tokens", "output_tokens", "status"});
+            // Header: row_id, custom_id, prompt, result, model, input_tokens, output_tokens, status
+            csvWriter.writeNext(new String[]{"row_id", "custom_id", "prompt", "result", "model", "input_tokens", "output_tokens", "status"});
 
             for (MergedResultDto result : results) {
                 csvWriter.writeNext(new String[]{
-                        result.getId(),
+                        result.getRowId(),
+                        result.getCustomId(),
                         result.getPrompt(),
                         result.getResultText(),
                         result.getModel(),

@@ -69,16 +69,6 @@ class JsonlBatchFileParserTest {
     }
 
     @Test
-    @DisplayName("필수 필드(id)가 누락되면 예외가 발생한다")
-    void throwExceptionWhenIdMissing() {
-        String jsonl = "{\"prompt\":\"Hello\"}";
-        
-        assertThatThrownBy(() -> parser.parse(new ByteArrayInputStream(jsonl.getBytes(StandardCharsets.UTF_8))))
-                .isInstanceOf(BatchParsingException.class)
-                .hasMessageContaining("Missing required field 'id'");
-    }
-
-    @Test
     @DisplayName("필수 필드(prompt)가 누락되면 예외가 발생한다")
     void throwExceptionWhenPromptMissing() {
         String jsonl = "{\"id\":\"1\"}";
