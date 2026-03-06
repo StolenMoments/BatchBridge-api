@@ -1,0 +1,19 @@
+spring:
+  application:
+    name: BatchBridge
+  datasource:
+    driver-class-name: org.mariadb.jdbc.Driver
+    url: jdbc:mariadb://${DB_IP:localhost}:3306/batch_bridge
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+    defer-datasource-initialization: true
+  sql:
+    init:
+      mode: never
