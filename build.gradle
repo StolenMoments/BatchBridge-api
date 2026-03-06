@@ -40,6 +40,8 @@ dependencies {
     implementation 'com.ibm.icu:icu4j:74.2'
     // Jackson for .jsonl parsing
     implementation 'com.fasterxml.jackson.core:jackson-databind'
+    // jtokkit for token estimation
+    implementation 'com.knuddels:jtokkit:1.1.0'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
     runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'

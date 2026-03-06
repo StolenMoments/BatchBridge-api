@@ -5,6 +5,7 @@ import org.jh.batchbridge.exception.InvalidFileUploadException;
 import org.jh.batchbridge.repository.JobRepository;
 import org.jh.batchbridge.repository.ResultRepository;
 import org.jh.batchbridge.service.parser.BatchFileParser;
+import org.jh.batchbridge.service.TokenEstimator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -30,11 +31,14 @@ class BatchJobServiceTest {
     @Mock
     private ResultRepository resultRepository;
 
+    @Mock
+    private TokenEstimator tokenEstimator;
+
     private BatchJobService batchJobService;
 
     @BeforeEach
     void setUp() {
-        batchJobService = new BatchJobService(List.of(csvParser), jobRepository, resultRepository);
+        batchJobService = new BatchJobService(List.of(csvParser), jobRepository, resultRepository, tokenEstimator);
     }
 
     @Test

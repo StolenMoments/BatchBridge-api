@@ -1,6 +1,7 @@
 package org.jh.batchbridge.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.jh.batchbridge.domain.Job;
 import org.jh.batchbridge.domain.Result;
 import org.jh.batchbridge.dto.BatchRowDto;
@@ -17,6 +18,7 @@ import java.io.InputStream;
 import java.util.List;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class BatchJobService {
@@ -24,6 +26,7 @@ public class BatchJobService {
     private final List<BatchFileParser> parsers;
     private final JobRepository jobRepository;
     private final ResultRepository resultRepository;
+    private final TokenEstimator tokenEstimator;
 
     @Transactional
     public Job createJobFromUpload(MultipartFile file, String defaultModel) {
@@ -58,6 +61,11 @@ public class BatchJobService {
                 .orElseThrow(() -> new InvalidFileUploadException(ErrorMessage.FILE_FORMAT_UNSUPPORTED));
 
         List<BatchRowDto> rows = parser.parse(inputStream);
+
+        int totalTokens = tokenEstimator.estimateTotalTokens(rows);
+        double estimatedCost = tokenEstimator.estimateCost(totalTokens, defaultModel);
+        log.info("[TokenEstimate] file={}, rows={}, estimatedInputTokens={}, model={}, estimatedCost=${}",
+                fileName, rows.size(), totalTokens, defaultModel, String.format("%.6f", estimatedCost));
 
         Job job = Job.builder()
                 .name(fileName)
