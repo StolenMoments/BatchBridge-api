@@ -32,6 +32,12 @@ dependencies {
     implementation 'org.apache.poi:poi-ooxml:5.4.0'
     // Apache ODF Toolkit for .ods parsing
     implementation 'org.odftoolkit:odfdom-java:0.12.0'
+    // OpenCSV for .csv parsing
+    implementation 'com.opencsv:opencsv:5.9'
+    // ICU4J for encoding detection
+    implementation 'com.ibm.icu:icu4j:74.2'
+    // Jackson for .jsonl parsing
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
     compileOnly 'org.projectlombok:lombok'
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
     runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
