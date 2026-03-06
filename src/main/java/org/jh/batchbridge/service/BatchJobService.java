@@ -2,19 +2,23 @@ package org.jh.batchbridge.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jh.batchbridge.domain.Chunk;
 import org.jh.batchbridge.domain.Job;
 import org.jh.batchbridge.domain.Result;
 import org.jh.batchbridge.dto.BatchRowDto;
 import org.jh.batchbridge.exception.ErrorMessage;
 import org.jh.batchbridge.exception.InvalidFileUploadException;
+import org.jh.batchbridge.repository.ChunkRepository;
 import org.jh.batchbridge.repository.JobRepository;
 import org.jh.batchbridge.repository.ResultRepository;
 import org.jh.batchbridge.service.parser.BatchFileParser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -27,6 +31,7 @@ public class BatchJobService {
     private final List<BatchFileParser> parsers;
     private final JobRepository jobRepository;
     private final ResultRepository resultRepository;
+    private final ChunkRepository chunkRepository;
     private final TokenEstimator tokenEstimator;
 
     @Transactional
@@ -83,24 +88,63 @@ public class BatchJobService {
         rowsByModel.forEach((model, modelRows) -> {
             int modelTokens = tokenEstimator.estimateTotalTokens(modelRows);
             double modelCost = tokenEstimator.estimateCost(modelTokens, model);
-            log.info("[ModelGroup] model={}, rows={}, estimatedInputTokens={}, estimatedCost=${}",
-                    model, modelRows.size(), modelTokens, String.format("%.6f", modelCost));
+            int batchLimit = tokenEstimator.resolveBatchLimit(model);
+            List<List<BatchRowDto>> chunks = tokenEstimator.splitIntoChunks(modelRows, model);
+            log.info("[ModelGroup] model={}, rows={}, estimatedInputTokens={}, estimatedCost=${}, batchLimit={}, chunks={}",
+                    model, modelRows.size(), modelTokens, String.format("%.6f", modelCost), batchLimit, chunks.size());
+            saveChunks(savedJob, model, chunks);
         });
 
-        List<Result> results = rows.stream()
-                .map(row -> Result.builder()
-                        .job(savedJob)
-                        .rowIdentifier(row.getId())
-                        .prompt(row.getPrompt())
-                        .status(Result.ResultStatus.PENDING) // 초기 상태는 PENDING
-                        .inputTokens(0)
-                        .outputTokens(0)
-                        .build())
-                .collect(Collectors.toList());
-
-        resultRepository.saveAll(results);
-
         return savedJob;
+    }
+
+    /**
+     * 청크 목록을 Chunk 엔티티로 저장하고, 각 행을 Result로 저장한다.
+     */
+    private void saveChunks(Job job, String model, List<List<BatchRowDto>> chunkGroups) {
+        String provider = resolveProvider(model);
+        for (int i = 0; i < chunkGroups.size(); i++) {
+            List<BatchRowDto> chunkRows = chunkGroups.get(i);
+
+            Chunk chunk = Chunk.builder()
+                    .job(job)
+                    .provider(provider)
+                    .model(model)
+                    .status(Chunk.ChunkStatus.CREATED)
+                    .rowCount(chunkRows.size())
+                    .build();
+
+            Chunk savedChunk = chunkRepository.save(chunk);
+
+            log.info("[ChunkCreated] jobId={}, chunkId={}, model={}, chunkIndex={}/{}, rows={}",
+                    job.getId(), savedChunk.getId(), model, i + 1, chunkGroups.size(), chunkRows.size());
+
+            List<Result> results = chunkRows.stream()
+                    .map(row -> Result.builder()
+                            .job(job)
+                            .chunk(savedChunk)
+                            .rowIdentifier(row.getId())
+                            .prompt(row.getPrompt())
+                            .status(Result.ResultStatus.PENDING)
+                            .inputTokens(0)
+                            .outputTokens(0)
+                            .build())
+                    .collect(Collectors.toList());
+
+            resultRepository.saveAll(results);
+        }
+    }
+
+    /**
+     * 모델명으로 provider(API 제공사)를 결정한다.
+     */
+    public String resolveProvider(String model) {
+        if (model == null) return "unknown";
+        String lower = model.toLowerCase();
+        if (lower.startsWith("claude")) return "anthropic";
+        if (lower.startsWith("gemini")) return "google";
+        if (lower.startsWith("grok")) return "xai";
+        return "unknown";
     }
 
     /**
