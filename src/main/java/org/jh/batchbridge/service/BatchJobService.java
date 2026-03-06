@@ -16,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -78,6 +79,14 @@ public class BatchJobService {
 
         Job savedJob = jobRepository.save(job);
 
+        Map<String, List<BatchRowDto>> rowsByModel = groupRowsByModel(rows, defaultModel);
+        rowsByModel.forEach((model, modelRows) -> {
+            int modelTokens = tokenEstimator.estimateTotalTokens(modelRows);
+            double modelCost = tokenEstimator.estimateCost(modelTokens, model);
+            log.info("[ModelGroup] model={}, rows={}, estimatedInputTokens={}, estimatedCost=${}",
+                    model, modelRows.size(), modelTokens, String.format("%.6f", modelCost));
+        });
+
         List<Result> results = rows.stream()
                 .map(row -> Result.builder()
                         .job(savedJob)
@@ -92,5 +101,18 @@ public class BatchJobService {
         resultRepository.saveAll(results);
 
         return savedJob;
+    }
+
+    /**
+     * 행 목록을 model 컬럼 기준으로 그룹화한다.
+     * 행에 model이 없으면 defaultModel을 사용한다 (혼합 배치 지원).
+     */
+    public Map<String, List<BatchRowDto>> groupRowsByModel(List<BatchRowDto> rows, String defaultModel) {
+        return rows.stream()
+                .collect(Collectors.groupingBy(row ->
+                        (row.getModel() != null && !row.getModel().isBlank())
+                                ? row.getModel()
+                                : defaultModel
+                ));
     }
 }
