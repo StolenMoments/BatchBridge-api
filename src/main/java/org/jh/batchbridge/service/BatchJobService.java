@@ -6,6 +6,7 @@ import org.jh.batchbridge.domain.Chunk;
 import org.jh.batchbridge.domain.Job;
 import org.jh.batchbridge.domain.Result;
 import org.jh.batchbridge.dto.BatchRowDto;
+import org.jh.batchbridge.dto.MergedResultDto;
 import org.jh.batchbridge.exception.ErrorMessage;
 import org.jh.batchbridge.exception.InvalidFileUploadException;
 import org.jh.batchbridge.repository.ChunkRepository;
@@ -312,5 +313,61 @@ public class BatchJobService {
                                 ? row.getModel()
                                 : defaultModel
                 ));
+    }
+
+    /**
+     * Job ID를 기반으로 모든 모델의 결과를 수집하고 원본 입력 정보와 병합한다.
+     */
+    @Transactional(readOnly = true)
+    public List<MergedResultDto> getMergedResults(Long jobId) {
+        Job job = jobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        List<Result> results = resultRepository.findByJobId(jobId);
+
+        return results.stream()
+                .map(r -> MergedResultDto.builder()
+                        .id(r.getRowIdentifier())
+                        .prompt(r.getPrompt())
+                        .model(r.getChunk().getModel())
+                        .resultText(r.getResultText())
+                        .status(r.getStatus().name())
+                        .inputTokens(r.getInputTokens())
+                        .outputTokens(r.getOutputTokens())
+                        .errorMessage(r.getErrorMessage())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Job ID를 기반으로 모든 모델의 결과를 수집하고 CSV 형식의 byte[]로 변환한다.
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportResultsToCsv(Long jobId) {
+        List<MergedResultDto> results = getMergedResults(jobId);
+
+        try (java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+             java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(out, java.nio.charset.StandardCharsets.UTF_8);
+             com.opencsv.CSVWriter csvWriter = new com.opencsv.CSVWriter(writer)) {
+
+            // Header: id, prompt, result, model, input_tokens, output_tokens, status
+            csvWriter.writeNext(new String[]{"id", "prompt", "result", "model", "input_tokens", "output_tokens", "status"});
+
+            for (MergedResultDto result : results) {
+                csvWriter.writeNext(new String[]{
+                        result.getId(),
+                        result.getPrompt(),
+                        result.getResultText(),
+                        result.getModel(),
+                        String.valueOf(result.getInputTokens() != null ? result.getInputTokens() : 0),
+                        String.valueOf(result.getOutputTokens() != null ? result.getOutputTokens() : 0),
+                        result.getStatus()
+                });
+            }
+            csvWriter.flush();
+            return out.toByteArray();
+        } catch (java.io.IOException e) {
+            throw new RuntimeException("Failed to generate CSV file", e);
+        }
     }
 }

@@ -4,6 +4,7 @@ import org.jh.batchbridge.domain.Chunk;
 import org.jh.batchbridge.domain.Job;
 import org.jh.batchbridge.domain.Result;
 import org.jh.batchbridge.dto.BatchRowDto;
+import org.jh.batchbridge.dto.MergedResultDto;
 import org.jh.batchbridge.exception.ErrorMessage;
 import org.jh.batchbridge.exception.InvalidFileUploadException;
 import org.jh.batchbridge.repository.ChunkRepository;
@@ -261,5 +262,71 @@ class BatchJobServiceTest {
         assertThat(job.getStatus()).isEqualTo(Job.JobStatus.FAILED);
         verify(chunkRepository).save(chunk);
         verify(jobRepository).save(job);
+    }
+
+    @Test
+    @DisplayName("Job ID로 결과를 조회하면 병합된 결과 리스트가 반환된다")
+    void getMergedResultsSuccess() {
+        // given
+        Long jobId = 1L;
+        Job job = Job.builder().id(jobId).name("test-job").build();
+        Chunk chunk = Chunk.builder().id(10L).job(job).model("claude-3-5-sonnet").build();
+        Result result = Result.builder()
+                .rowIdentifier("row-1")
+                .prompt("test prompt")
+                .chunk(chunk)
+                .resultText("result text")
+                .status(Result.ResultStatus.SUCCESS)
+                .inputTokens(10)
+                .outputTokens(20)
+                .build();
+
+        when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
+        when(resultRepository.findByJobId(jobId)).thenReturn(List.of(result));
+
+        // when
+        List<MergedResultDto> mergedResults = batchJobService.getMergedResults(jobId);
+
+        // then
+        assertThat(mergedResults).hasSize(1);
+        MergedResultDto dto = mergedResults.get(0);
+        assertThat(dto.getId()).isEqualTo("row-1");
+        assertThat(dto.getPrompt()).isEqualTo("test prompt");
+        assertThat(dto.getModel()).isEqualTo("claude-3-5-sonnet");
+        assertThat(dto.getResultText()).isEqualTo("result text");
+        assertThat(dto.getStatus()).isEqualTo("SUCCESS");
+        assertThat(dto.getInputTokens()).isEqualTo(10);
+        assertThat(dto.getOutputTokens()).isEqualTo(20);
+    }
+
+    @Test
+    @DisplayName("결과를 CSV로 내보내면 올바른 헤더와 데이터가 포함된다")
+    void exportResultsToCsvSuccess() throws Exception {
+        // given
+        Long jobId = 1L;
+        Job job = Job.builder().id(jobId).name("test-job").build();
+        Chunk chunk = Chunk.builder().id(10L).job(job).model("claude-3-5-sonnet").build();
+        Result result = Result.builder()
+                .rowIdentifier("row-1")
+                .prompt("test prompt")
+                .chunk(chunk)
+                .resultText("result text")
+                .status(Result.ResultStatus.SUCCESS)
+                .inputTokens(10)
+                .outputTokens(20)
+                .build();
+
+        when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
+        when(resultRepository.findByJobId(jobId)).thenReturn(List.of(result));
+
+        // when
+        byte[] csvBytes = batchJobService.exportResultsToCsv(jobId);
+        String csvContent = new String(csvBytes, java.nio.charset.StandardCharsets.UTF_8);
+
+        // then
+        String[] lines = csvContent.split("\n");
+        // OpenCSV might add quotes or use different line endings, but basic check:
+        assertThat(lines[0]).contains("id", "prompt", "result", "model", "input_tokens", "output_tokens", "status");
+        assertThat(lines[1]).contains("row-1", "test prompt", "result text", "claude-3-5-sonnet", "10", "20", "SUCCESS");
     }
 }
