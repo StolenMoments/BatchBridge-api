@@ -1,11 +1,15 @@
 package org.jh.batchbridge.service;
 
+import org.jh.batchbridge.domain.Chunk;
+import org.jh.batchbridge.domain.Job;
+import org.jh.batchbridge.domain.Result;
 import org.jh.batchbridge.dto.BatchRowDto;
 import org.jh.batchbridge.exception.ErrorMessage;
 import org.jh.batchbridge.exception.InvalidFileUploadException;
 import org.jh.batchbridge.repository.ChunkRepository;
 import org.jh.batchbridge.repository.JobRepository;
 import org.jh.batchbridge.repository.ResultRepository;
+import org.jh.batchbridge.service.adapter.BaseBatchAdapter;
 import org.jh.batchbridge.service.parser.BatchFileParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -18,8 +22,14 @@ import org.springframework.mock.web.MockMultipartFile;
 import java.util.List;
 import java.util.Map;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -40,11 +50,14 @@ class BatchJobServiceTest {
     @Mock
     private TokenEstimator tokenEstimator;
 
+    @Mock
+    private BaseBatchAdapter adapter;
+
     private BatchJobService batchJobService;
 
     @BeforeEach
     void setUp() {
-        batchJobService = new BatchJobService(List.of(csvParser), jobRepository, resultRepository, chunkRepository, tokenEstimator);
+        batchJobService = new BatchJobService(List.of(csvParser), jobRepository, resultRepository, chunkRepository, tokenEstimator, List.of(adapter));
     }
 
     @Test
@@ -156,5 +169,31 @@ class BatchJobServiceTest {
     void resolveProviderForUnknown() {
         assertThat(batchJobService.resolveProvider("unknown-model")).isEqualTo("unknown");
         assertThat(batchJobService.resolveProvider(null)).isEqualTo("unknown");
+    }
+
+    @Test
+    @DisplayName("submitJob()은 PENDING 상태인 Job의 Chunk를 제출하고 상태를 업데이트한다")
+    void submitJobSuccess() {
+        // Given
+        Long jobId = 1L;
+        Job job = Job.builder().id(jobId).status(Job.JobStatus.PENDING).build();
+        Chunk chunk = Chunk.builder().id(10L).job(job).provider("anthropic").model("claude-3").status(Chunk.ChunkStatus.CREATED).build();
+        Result result = Result.builder().rowIdentifier("row-1").prompt("hello").build();
+
+        when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
+        when(chunkRepository.findByJobId(jobId)).thenReturn(List.of(chunk));
+        when(resultRepository.findByChunkId(chunk.getId())).thenReturn(List.of(result));
+        when(adapter.getProvider()).thenReturn("anthropic");
+        when(adapter.submitBatch(anyList(), anyString())).thenReturn("ext-batch-123");
+
+        // When
+        batchJobService.submitJob(jobId);
+
+        // Then
+        assertThat(chunk.getExternalBatchId()).isEqualTo("ext-batch-123");
+        assertThat(chunk.getStatus()).isEqualTo(Chunk.ChunkStatus.SUBMITTED);
+        assertThat(job.getStatus()).isEqualTo(Job.JobStatus.PROCESSING);
+        verify(chunkRepository).save(chunk);
+        verify(jobRepository).save(job);
     }
 }

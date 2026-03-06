@@ -11,6 +11,7 @@ import org.jh.batchbridge.exception.InvalidFileUploadException;
 import org.jh.batchbridge.repository.ChunkRepository;
 import org.jh.batchbridge.repository.JobRepository;
 import org.jh.batchbridge.repository.ResultRepository;
+import org.jh.batchbridge.service.adapter.BaseBatchAdapter;
 import org.jh.batchbridge.service.parser.BatchFileParser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,6 +34,7 @@ public class BatchJobService {
     private final ResultRepository resultRepository;
     private final ChunkRepository chunkRepository;
     private final TokenEstimator tokenEstimator;
+    private final List<BaseBatchAdapter> adapters;
 
     @Transactional
     public Job createJobFromUpload(MultipartFile file, String defaultModel) {
@@ -133,6 +135,63 @@ public class BatchJobService {
 
             resultRepository.saveAll(results);
         }
+    }
+
+    /**
+     * 특정 작업을 실행(API 제출)한다.
+     */
+    @Transactional
+    public void submitJob(Long jobId) {
+        Job job = jobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        if (job.getStatus() != Job.JobStatus.PENDING) {
+            log.warn("[SubmitJob] Job is not in PENDING status. jobId={}, status={}", jobId, job.getStatus());
+            return;
+        }
+
+        List<Chunk> chunks = chunkRepository.findByJobId(jobId);
+        boolean allSubmitted = true;
+
+        for (Chunk chunk : chunks) {
+            if (chunk.getStatus() != Chunk.ChunkStatus.CREATED) continue;
+
+            try {
+                submitChunk(chunk);
+            } catch (Exception e) {
+                log.error("[SubmitChunk] Failed to submit chunk. chunkId={}, error={}", chunk.getId(), e.getMessage());
+                chunk.setStatus(Chunk.ChunkStatus.FAILED);
+                allSubmitted = false;
+            }
+        }
+
+        job.setStatus(allSubmitted ? Job.JobStatus.PROCESSING : Job.JobStatus.FAILED);
+        jobRepository.save(job);
+    }
+
+    private void submitChunk(Chunk chunk) {
+        BaseBatchAdapter adapter = adapters.stream()
+                .filter(a -> a.getProvider().equalsIgnoreCase(chunk.getProvider()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("No adapter found for provider: " + chunk.getProvider()));
+
+        List<Result> results = resultRepository.findByChunkId(chunk.getId());
+        List<BatchRowDto> rows = results.stream()
+                .map(r -> BatchRowDto.builder()
+                        .id(r.getRowIdentifier())
+                        .prompt(r.getPrompt())
+                        .model(chunk.getModel())
+                        .build())
+                .collect(Collectors.toList());
+
+        String externalBatchId = adapter.submitBatch(rows, chunk.getModel());
+
+        chunk.setExternalBatchId(externalBatchId);
+        chunk.setStatus(Chunk.ChunkStatus.SUBMITTED);
+        chunkRepository.save(chunk);
+
+        log.info("[ChunkSubmitted] jobId={}, chunkId={}, externalBatchId={}",
+                chunk.getJob().getId(), chunk.getId(), externalBatchId);
     }
 
     /**
