@@ -20,7 +20,7 @@ public class Result {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "chunk_id", nullable = false)
+    @JoinColumn(name = "chunk_id")
     private Chunk chunk;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -54,6 +54,6 @@ public class Result {
     private LocalDateTime createdAt;
 
     public enum ResultStatus {
-        SUCCESS, FAIL
+        PENDING, SUCCESS, FAIL
     }
 }
