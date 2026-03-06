@@ -10,4 +10,5 @@ import java.util.List;
 public interface ResultRepository extends JpaRepository<Result, Long> {
     List<Result> findByJobId(Long jobId);
     List<Result> findByChunkId(Long chunkId);
+    java.util.Optional<Result> findByChunkIdAndRowIdentifier(Long chunkId, String rowIdentifier);
 }

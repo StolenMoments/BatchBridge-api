@@ -195,6 +195,101 @@ public class BatchJobService {
     }
 
     /**
+     * 앱 시작 시 미완료된(SUBMITTED 상태) 청크들의 상태를 동기화한다.
+     */
+    @Transactional
+    public void syncUnfinishedJobs() {
+        log.info("[SyncUnfinishedJobs] Starting synchronization of unfinished chunks...");
+        List<Chunk> submittedChunks = chunkRepository.findByStatus(Chunk.ChunkStatus.SUBMITTED);
+
+        if (submittedChunks.isEmpty()) {
+            log.info("[SyncUnfinishedJobs] No unfinished chunks found.");
+            return;
+        }
+
+        for (Chunk chunk : submittedChunks) {
+            try {
+                syncChunkStatus(chunk);
+            } catch (Exception e) {
+                log.error("[SyncUnfinishedJobs] Failed to sync chunk status. chunkId={}, error={}", chunk.getId(), e.getMessage());
+            }
+        }
+        log.info("[SyncUnfinishedJobs] Synchronization completed.");
+    }
+
+    private void syncChunkStatus(Chunk chunk) {
+        BaseBatchAdapter adapter = adapters.stream()
+                .filter(a -> a.getProvider().equalsIgnoreCase(chunk.getProvider()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("No adapter found for provider: " + chunk.getProvider()));
+
+        BaseBatchAdapter.BatchStatus status = adapter.checkStatus(chunk.getExternalBatchId());
+        log.info("[SyncChunkStatus] chunkId={}, externalId={}, status={}", chunk.getId(), chunk.getExternalBatchId(), status);
+
+        if (status == BaseBatchAdapter.BatchStatus.COMPLETED) {
+            processCompletedChunk(chunk, adapter);
+        } else if (status == BaseBatchAdapter.BatchStatus.FAILED || status == BaseBatchAdapter.BatchStatus.CANCELLED) {
+            chunk.setStatus(Chunk.ChunkStatus.FAILED);
+            chunkRepository.save(chunk);
+            updateJobStatusAfterChunkUpdate(chunk.getJob());
+        }
+    }
+
+    private void processCompletedChunk(Chunk chunk, BaseBatchAdapter adapter) {
+        List<BaseBatchAdapter.BatchResultItem> results = adapter.collectResults(chunk.getExternalBatchId());
+
+        int completedCount = 0;
+        int failedCount = 0;
+
+        for (BaseBatchAdapter.BatchResultItem item : results) {
+            Result result = resultRepository.findByChunkIdAndRowIdentifier(chunk.getId(), item.rowId())
+                    .orElse(null);
+
+            if (result == null) {
+                log.warn("[ProcessCompletedChunk] Result record not found. chunkId={}, rowId={}", chunk.getId(), item.rowId());
+                continue;
+            }
+
+            if (item.success()) {
+                result.setResultText(item.resultText());
+                result.setStatus(Result.ResultStatus.SUCCESS);
+                result.setInputTokens(item.inputTokens());
+                result.setOutputTokens(item.outputTokens());
+                completedCount++;
+            } else {
+                result.setErrorMessage(item.errorMessage());
+                result.setStatus(Result.ResultStatus.FAIL);
+                failedCount++;
+            }
+            resultRepository.save(result);
+        }
+
+        chunk.setStatus(Chunk.ChunkStatus.COMPLETED);
+        chunkRepository.save(chunk);
+
+        Job job = chunk.getJob();
+        job.setCompletedRows(job.getCompletedRows() + completedCount);
+        job.setFailedRows(job.getFailedRows() + failedCount);
+        updateJobStatusAfterChunkUpdate(job);
+
+        log.info("[ChunkCompleted] chunkId={}, completed={}, failed={}", chunk.getId(), completedCount, failedCount);
+    }
+
+    private void updateJobStatusAfterChunkUpdate(Job job) {
+        List<Chunk> chunks = chunkRepository.findByJobId(job.getId());
+        boolean allFinished = chunks.stream()
+                .allMatch(c -> c.getStatus() == Chunk.ChunkStatus.COMPLETED || c.getStatus() == Chunk.ChunkStatus.FAILED);
+
+        if (allFinished) {
+            boolean anyFailed = chunks.stream().anyMatch(c -> c.getStatus() == Chunk.ChunkStatus.FAILED);
+            job.setStatus(anyFailed ? Job.JobStatus.FAILED : Job.JobStatus.COMPLETED);
+        } else {
+            job.setStatus(Job.JobStatus.PROCESSING);
+        }
+        jobRepository.save(job);
+    }
+
+    /**
      * 모델명으로 provider(API 제공사)를 결정한다.
      */
     public String resolveProvider(String model) {

@@ -174,11 +174,11 @@ class BatchJobServiceTest {
     @Test
     @DisplayName("submitJob()은 PENDING 상태인 Job의 Chunk를 제출하고 상태를 업데이트한다")
     void submitJobSuccess() {
-        // Given
+        // ... (이전과 동일한 내용은 생략하고 전체 메서드를 유지하기 위해 그대로 작성)
         Long jobId = 1L;
         Job job = Job.builder().id(jobId).status(Job.JobStatus.PENDING).build();
         Chunk chunk = Chunk.builder().id(10L).job(job).provider("anthropic").model("claude-3").status(Chunk.ChunkStatus.CREATED).build();
-        Result result = Result.builder().rowIdentifier("row-1").prompt("hello").build();
+        Result result = Result.builder().id(100L).chunk(chunk).job(job).rowIdentifier("row-1").prompt("hello").build();
 
         when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
         when(chunkRepository.findByJobId(jobId)).thenReturn(List.of(chunk));
@@ -193,6 +193,72 @@ class BatchJobServiceTest {
         assertThat(chunk.getExternalBatchId()).isEqualTo("ext-batch-123");
         assertThat(chunk.getStatus()).isEqualTo(Chunk.ChunkStatus.SUBMITTED);
         assertThat(job.getStatus()).isEqualTo(Job.JobStatus.PROCESSING);
+        verify(chunkRepository).save(chunk);
+        verify(jobRepository).save(job);
+    }
+
+    @Test
+    @DisplayName("syncUnfinishedJobs()는 SUBMITTED 상태인 청크의 상태를 조회하고 완료 시 결과를 저장한다")
+    void syncUnfinishedJobsSuccess() {
+        // Given
+        Job job = Job.builder().id(1L).status(Job.JobStatus.PROCESSING).completedRows(0).failedRows(0).build();
+        Chunk chunk = Chunk.builder()
+                .id(10L)
+                .job(job)
+                .provider("anthropic")
+                .externalBatchId("ext-id-123")
+                .status(Chunk.ChunkStatus.SUBMITTED)
+                .build();
+        Result result = Result.builder().id(100L).chunk(chunk).job(job).rowIdentifier("row-1").status(Result.ResultStatus.PENDING).build();
+
+        when(chunkRepository.findByStatus(Chunk.ChunkStatus.SUBMITTED)).thenReturn(List.of(chunk));
+        when(adapter.getProvider()).thenReturn("anthropic");
+        when(adapter.checkStatus("ext-id-123")).thenReturn(BaseBatchAdapter.BatchStatus.COMPLETED);
+        when(adapter.collectResults("ext-id-123")).thenReturn(List.of(
+                BaseBatchAdapter.BatchResultItem.success("row-1", "response text", 10, 20)
+        ));
+        when(resultRepository.findByChunkIdAndRowIdentifier(10L, "row-1")).thenReturn(Optional.of(result));
+        when(chunkRepository.findByJobId(1L)).thenReturn(List.of(chunk));
+
+        // When
+        batchJobService.syncUnfinishedJobs();
+
+        // Then
+        assertThat(chunk.getStatus()).isEqualTo(Chunk.ChunkStatus.COMPLETED);
+        assertThat(result.getStatus()).isEqualTo(Result.ResultStatus.SUCCESS);
+        assertThat(result.getResultText()).isEqualTo("response text");
+        assertThat(job.getCompletedRows()).isEqualTo(1);
+        assertThat(job.getStatus()).isEqualTo(Job.JobStatus.COMPLETED);
+
+        verify(resultRepository).save(result);
+        verify(chunkRepository).save(chunk);
+        verify(jobRepository).save(job);
+    }
+
+    @Test
+    @DisplayName("syncUnfinishedJobs()는 외부 배치 상태가 FAILED이면 청크 상태를 FAILED로 변경한다")
+    void syncUnfinishedJobsFailed() {
+        // Given
+        Job job = Job.builder().id(1L).status(Job.JobStatus.PROCESSING).build();
+        Chunk chunk = Chunk.builder()
+                .id(10L)
+                .job(job)
+                .provider("anthropic")
+                .externalBatchId("ext-id-failed")
+                .status(Chunk.ChunkStatus.SUBMITTED)
+                .build();
+
+        when(chunkRepository.findByStatus(Chunk.ChunkStatus.SUBMITTED)).thenReturn(List.of(chunk));
+        when(adapter.getProvider()).thenReturn("anthropic");
+        when(adapter.checkStatus("ext-id-failed")).thenReturn(BaseBatchAdapter.BatchStatus.FAILED);
+        when(chunkRepository.findByJobId(1L)).thenReturn(List.of(chunk));
+
+        // When
+        batchJobService.syncUnfinishedJobs();
+
+        // Then
+        assertThat(chunk.getStatus()).isEqualTo(Chunk.ChunkStatus.FAILED);
+        assertThat(job.getStatus()).isEqualTo(Job.JobStatus.FAILED);
         verify(chunkRepository).save(chunk);
         verify(jobRepository).save(job);
     }
