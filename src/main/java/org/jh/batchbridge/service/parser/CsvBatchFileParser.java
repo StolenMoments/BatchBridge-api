@@ -94,12 +94,7 @@ public class CsvBatchFileParser implements BatchFileParser {
     }
 
     private void validateRequiredColumns(Map<String, Integer> headerMap) {
-        if (!headerMap.containsKey(COL_ID)) {
-            throw new BatchParsingException("Missing required column: " + COL_ID);
-        }
-        if (!headerMap.containsKey(COL_PROMPT)) {
-            throw new BatchParsingException("Missing required column: " + COL_PROMPT);
-        }
+        SchemaValidator.validateRequiredColumns(headerMap);
     }
 
     private BatchRowDto mapRowToDto(String[] row, Map<String, Integer> headerMap) {

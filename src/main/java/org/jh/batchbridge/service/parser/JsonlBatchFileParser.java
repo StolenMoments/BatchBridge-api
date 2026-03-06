@@ -59,11 +59,6 @@ public class JsonlBatchFileParser implements BatchFileParser {
     }
 
     private void validateRequiredFields(BatchRowDto row, int lineNumber) {
-        if (row.getId() == null || row.getId().trim().isEmpty()) {
-            throw new BatchParsingException("Missing required field 'id' at line " + lineNumber);
-        }
-        if (row.getPrompt() == null || row.getPrompt().trim().isEmpty()) {
-            throw new BatchParsingException("Missing required field 'prompt' at line " + lineNumber);
-        }
+        SchemaValidator.validateRequiredFields(row, lineNumber);
     }
 }
