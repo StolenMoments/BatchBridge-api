@@ -67,9 +67,9 @@ public class EntityMappingTest {
         // Then
         assertThat(savedJob.getName()).isEqualTo("test_batch.xlsx");
         assertThat(savedChunks).hasSize(1);
-        assertThat(savedChunks.get(0).getProvider()).isEqualTo("Anthropic");
+        assertThat(savedChunks.getFirst().getProvider()).isEqualTo("Anthropic");
         assertThat(savedResults).hasSize(1);
-        assertThat(savedResults.get(0).getRowIdentifier()).isEqualTo("row-1");
-        assertThat(savedResults.get(0).getJob().getId()).isEqualTo(savedJob.getId());
+        assertThat(savedResults.getFirst().getRowIdentifier()).isEqualTo("row-1");
+        assertThat(savedResults.getFirst().getJob().getId()).isEqualTo(savedJob.getId());
     }
 }

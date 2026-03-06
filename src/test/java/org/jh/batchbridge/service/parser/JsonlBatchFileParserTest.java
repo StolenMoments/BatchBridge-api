@@ -27,9 +27,9 @@ class JsonlBatchFileParserTest {
         List<BatchRowDto> results = parser.parse(new ByteArrayInputStream(jsonl.getBytes(StandardCharsets.UTF_8)));
 
         assertThat(results).hasSize(2);
-        assertThat(results.get(0).getId()).isEqualTo("1");
-        assertThat(results.get(0).getPrompt()).isEqualTo("Hello");
-        assertThat(results.get(0).getModel()).isEqualTo("gpt-4");
+        assertThat(results.getFirst().getId()).isEqualTo("1");
+        assertThat(results.getFirst().getPrompt()).isEqualTo("Hello");
+        assertThat(results.getFirst().getModel()).isEqualTo("gpt-4");
         assertThat(results.get(0).getTemperature()).isEqualTo(0.7);
         assertThat(results.get(0).getMaxTokens()).isEqualTo(100);
 
