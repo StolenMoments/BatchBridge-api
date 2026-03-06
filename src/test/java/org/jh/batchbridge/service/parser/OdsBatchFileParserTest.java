@@ -3,6 +3,7 @@ package org.jh.batchbridge.service.parser;
 import org.jh.batchbridge.dto.BatchRowDto;
 import org.jh.batchbridge.exception.BatchParsingException;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.odftoolkit.odfdom.doc.OdfSpreadsheetDocument;
 import org.odftoolkit.odfdom.doc.table.OdfTable;
@@ -25,6 +26,7 @@ class OdsBatchFileParserTest {
     }
 
     @Test
+    @DisplayName("정상적인 ODS 파일을 파싱한다")
     void testParseValidOds() throws Exception {
         // Given
         byte[] odsContent = createOdsContent(new String[]{"id", "prompt", "model", "temperature"},
@@ -50,6 +52,7 @@ class OdsBatchFileParserTest {
     }
 
     @Test
+    @DisplayName("필수 컬럼(prompt)이 누락되면 예외가 발생한다")
     void testParseMissingRequiredColumn() throws Exception {
         // Given
         byte[] odsContent = createOdsContent(new String[]{"id", "not_prompt"},
@@ -64,6 +67,7 @@ class OdsBatchFileParserTest {
     }
 
     @Test
+    @DisplayName("지원하는 확장자 확인")
     void testSupports() {
         assertTrue(parser.supports("test.ods"));
         assertTrue(parser.supports("TEST.ODS"));

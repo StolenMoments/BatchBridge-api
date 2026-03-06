@@ -5,6 +5,7 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.jh.batchbridge.dto.BatchRowDto;
 import org.jh.batchbridge.exception.BatchParsingException;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -24,6 +25,7 @@ class XlsxBatchFileParserTest {
     }
 
     @Test
+    @DisplayName("정상적인 XLSX 파일을 파싱한다")
     void testParseValidXlsx() throws IOException {
         // Given
         byte[] excelContent = createExcelContent(new String[]{"id", "prompt", "model", "temperature"},
@@ -49,6 +51,7 @@ class XlsxBatchFileParserTest {
     }
 
     @Test
+    @DisplayName("필수 컬럼(prompt)이 누락되면 예외가 발생한다")
     void testParseMissingRequiredColumn() throws IOException {
         // Given
         byte[] excelContent = createExcelContent(new String[]{"id", "not_prompt"},
@@ -62,6 +65,7 @@ class XlsxBatchFileParserTest {
     }
 
     @Test
+    @DisplayName("빈 파일인 경우 예외가 발생한다")
     void testParseEmptyFile() throws IOException {
         // Given
         byte[] excelContent = createExcelContent(new String[]{}, new Object[][]{});
@@ -73,6 +77,7 @@ class XlsxBatchFileParserTest {
     }
 
     @Test
+    @DisplayName("지원하는 확장자 확인")
     void testSupports() {
         assertTrue(parser.supports("test.xlsx"));
         assertTrue(parser.supports("TEST.XLSX"));
