@@ -17,3 +17,15 @@ spring:
   sql:
     init:
       mode: never
+
+ai:
+  providers:
+    google:
+      api-key: ${GOOGLE_API_KEY:}
+      model: ${GOOGLE_MODEL:gemini-1.5-flash}
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+      model: ${ANTHROPIC_MODEL:claude-3-5-sonnet-latest}
+    xai:
+      api-key: ${XAI_API_KEY:}
+      model: ${XAI_MODEL:grok-2-latest}
