@@ -17,13 +17,13 @@ public final class RetryUtils {
     private static final Logger log = LoggerFactory.getLogger(RetryUtils.class);
 
     /** 기본 최대 재시도 횟수 */
-    public static final int DEFAULT_MAX_ATTEMPTS = 3;
+    public static int DEFAULT_MAX_ATTEMPTS = 3;
 
     /** 기본 초기 대기 시간(ms) */
-    public static final long DEFAULT_INITIAL_DELAY_MS = 1_000L;
+    public static long DEFAULT_INITIAL_DELAY_MS = 1_000L;
 
     /** 기본 최대 대기 시간(ms) */
-    public static final long DEFAULT_MAX_DELAY_MS = 30_000L;
+    public static long DEFAULT_MAX_DELAY_MS = 30_000L;
 
     /** 지수 배율 */
     private static final double BACKOFF_MULTIPLIER = 2.0;
@@ -57,11 +57,11 @@ public final class RetryUtils {
         int attempt = 0;
         long delayMs = initialDelayMs;
 
-        while (true) {
+        while (attempt < maxAttempts) {
             try {
+                attempt++;
                 return operation.get();
             } catch (WebClientResponseException e) {
-                attempt++;
                 int statusCode = e.getStatusCode().value();
 
                 if (!isRetryable(statusCode) || attempt >= maxAttempts) {
@@ -96,7 +96,6 @@ public final class RetryUtils {
                 delayMs = Math.min((long) (delayMs * BACKOFF_MULTIPLIER), maxDelayMs);
 
             } catch (Exception e) {
-                attempt++;
                 if (attempt >= maxAttempts) {
                     log.error("최대 재시도 횟수 초과 (시도: {}/{})", attempt, maxAttempts);
                     throw e;
@@ -106,6 +105,7 @@ public final class RetryUtils {
                 delayMs = Math.min((long) (delayMs * BACKOFF_MULTIPLIER), maxDelayMs);
             }
         }
+        throw new RuntimeException("최대 재시도 횟수 도달");
     }
 
     /**

@@ -26,6 +26,9 @@ class ClaudeBatchAdapterTest {
 
     @BeforeEach
     void setUp() throws IOException {
+        // 테스트 속도를 위해 재시도 대기 시간을 0으로 설정
+        RetryUtils.DEFAULT_INITIAL_DELAY_MS = 0L;
+
         mockWebServer = new MockWebServer();
         mockWebServer.start();
 
@@ -41,6 +44,9 @@ class ClaudeBatchAdapterTest {
 
     @AfterEach
     void tearDown() throws IOException {
+        // 재시도 대기 시간 원복
+        RetryUtils.DEFAULT_INITIAL_DELAY_MS = 1_000L;
+
         mockWebServer.shutdown();
     }
 
@@ -53,6 +59,12 @@ class ClaudeBatchAdapterTest {
     @Test
     @DisplayName("submitBatch()는 배치를 제출하고 외부 배치 ID를 반환한다")
     void submitBatch() throws InterruptedException {
+        // validateApiKey()용 200 OK
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("[]")
+                .addHeader("Content-Type", "application/json"));
+        // 배치 제출용 응답
         mockWebServer.enqueue(new MockResponse()
                 .setBody("{\"id\":\"batch_abc123\",\"processing_status\":\"in_progress\"}")
                 .addHeader("Content-Type", "application/json"));
@@ -65,6 +77,11 @@ class ClaudeBatchAdapterTest {
 
         assertThat(batchId).isEqualTo("batch_abc123");
 
+        // 1. ping 요청 검증
+        RecordedRequest pingReq = mockWebServer.takeRequest();
+        assertThat(pingReq.getPath()).isEqualTo("/v1/models");
+
+        // 2. 배치 제출 요청 검증
         RecordedRequest request = mockWebServer.takeRequest();
         assertThat(request.getMethod()).isEqualTo("POST");
         assertThat(request.getPath()).isEqualTo("/v1/messages/batches");
@@ -77,6 +94,12 @@ class ClaudeBatchAdapterTest {
     @Test
     @DisplayName("submitBatch()는 systemPrompt가 있으면 system 필드를 포함한다")
     void submitBatchWithSystemPrompt() throws InterruptedException {
+        // validateApiKey()용 200 OK
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("[]")
+                .addHeader("Content-Type", "application/json"));
+        // 배치 제출용 응답
         mockWebServer.enqueue(new MockResponse()
                 .setBody("{\"id\":\"batch_sys123\"}")
                 .addHeader("Content-Type", "application/json"));
@@ -87,6 +110,10 @@ class ClaudeBatchAdapterTest {
 
         adapter.submitBatch(rows, "claude-3-5-sonnet-latest");
 
+        // 1. ping 요청 검증
+        mockWebServer.takeRequest();
+
+        // 2. 배치 제출 요청 검증
         RecordedRequest request = mockWebServer.takeRequest();
         String body = request.getBody().readUtf8();
         assertThat(body).contains("You are helpful.");
@@ -235,6 +262,20 @@ class ClaudeBatchAdapterTest {
         String batchId = adapter.submitBatch(rows, "claude-3-5-sonnet-latest");
 
         assertThat(batchId).isEqualTo("batch_retry123");
+
+        // 1. ping 요청 검증
+        RecordedRequest pingReq = mockWebServer.takeRequest();
+        assertThat(pingReq.getPath()).isEqualTo("/v1/models");
+
+        // 2. 429 에러 발생한 첫 번째 제출 요청 검증
+        RecordedRequest failReq = mockWebServer.takeRequest();
+        assertThat(failReq.getMethod()).isEqualTo("POST");
+        assertThat(failReq.getPath()).isEqualTo("/v1/messages/batches");
+
+        // 3. 재시도하여 성공한 두 번째 제출 요청 검증
+        RecordedRequest successReq = mockWebServer.takeRequest();
+        assertThat(successReq.getMethod()).isEqualTo("POST");
+        assertThat(successReq.getPath()).isEqualTo("/v1/messages/batches");
     }
 
     @Test

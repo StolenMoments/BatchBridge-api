@@ -53,6 +53,12 @@ class GeminiBatchAdapterTest {
     @Test
     @DisplayName("submitBatch()는 배치를 제출하고 외부 배치 ID(name)를 반환한다")
     void submitBatch() throws InterruptedException {
+        // validateApiKey()용 200 OK
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"models\":[]}")
+                .addHeader("Content-Type", "application/json"));
+        // 배치 제출용 응답
         mockWebServer.enqueue(new MockResponse()
                 .setBody("{\"name\":\"operations/batch_xyz789\"}")
                 .addHeader("Content-Type", "application/json"));
@@ -65,6 +71,11 @@ class GeminiBatchAdapterTest {
 
         assertThat(batchId).isEqualTo("operations/batch_xyz789");
 
+        // 1. ping 요청 검증
+        RecordedRequest pingReq = mockWebServer.takeRequest();
+        assertThat(pingReq.getPath()).contains("/v1beta/models");
+
+        // 2. 배치 제출 요청 검증
         RecordedRequest request = mockWebServer.takeRequest();
         assertThat(request.getMethod()).isEqualTo("POST");
         assertThat(request.getPath()).contains("batchGenerateContent");
@@ -77,6 +88,12 @@ class GeminiBatchAdapterTest {
     @Test
     @DisplayName("submitBatch()는 systemPrompt가 있으면 system_instruction 필드를 포함한다")
     void submitBatchWithSystemPrompt() throws InterruptedException {
+        // validateApiKey()용 200 OK
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"models\":[]}")
+                .addHeader("Content-Type", "application/json"));
+        // 배치 제출용 응답
         mockWebServer.enqueue(new MockResponse()
                 .setBody("{\"name\":\"operations/batch_sys\"}")
                 .addHeader("Content-Type", "application/json"));
@@ -87,6 +104,10 @@ class GeminiBatchAdapterTest {
 
         adapter.submitBatch(rows, "gemini-1.5-flash");
 
+        // 1. ping 요청 검증
+        mockWebServer.takeRequest();
+
+        // 2. 배치 제출 요청 검증
         RecordedRequest request = mockWebServer.takeRequest();
         String body = request.getBody().readUtf8();
         assertThat(body).contains("Be concise.");

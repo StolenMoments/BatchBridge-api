@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -109,7 +110,7 @@ public class ClaudeBatchAdapter implements BaseBatchAdapter {
                     .bodyValue(body)
                     .retrieve()
                     .bodyToMono(JsonNode.class)
-                    .block();
+                    .block(Duration.ofSeconds(30));
             return response != null ? response.path("id").asText() : null;
         });
     }
@@ -120,7 +121,7 @@ public class ClaudeBatchAdapter implements BaseBatchAdapter {
                 .uri(BATCH_ENDPOINT + "/" + externalBatchId)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
-                .block());
+                .block(Duration.ofSeconds(30)));
 
         if (response == null) return BatchStatus.FAILED;
 
@@ -139,7 +140,7 @@ public class ClaudeBatchAdapter implements BaseBatchAdapter {
                 .uri(BATCH_ENDPOINT + "/" + externalBatchId)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
-                .block();
+                .block(Duration.ofSeconds(30));
 
         List<BatchResultItem> items = new ArrayList<>();
         if (batchInfo == null) return items;
@@ -152,7 +153,7 @@ public class ClaudeBatchAdapter implements BaseBatchAdapter {
                 .uri(resultsUrl)
                 .retrieve()
                 .bodyToMono(String.class)
-                .block();
+                .block(Duration.ofSeconds(60));
 
         if (rawResults == null || rawResults.isBlank()) return items;
 

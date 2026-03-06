@@ -53,6 +53,11 @@ class GrokBatchAdapterTest {
     @Test
     @DisplayName("submitBatch()는 파일 업로드 후 배치를 생성하고 배치 ID를 반환한다")
     void submitBatch() throws InterruptedException {
+        // 0단계: validateApiKey()용 200 OK
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("[]")
+                .addHeader("Content-Type", "application/json"));
         // 1단계: 파일 업로드 응답
         mockWebServer.enqueue(new MockResponse()
                 .setBody("{\"id\":\"file_abc\",\"object\":\"file\"}")
@@ -70,12 +75,16 @@ class GrokBatchAdapterTest {
 
         assertThat(batchId).isEqualTo("batch_grok123");
 
-        // 파일 업로드 요청 확인
+        // 0단계: ping 요청 확인
+        RecordedRequest pingRequest = mockWebServer.takeRequest();
+        assertThat(pingRequest.getPath()).isEqualTo("/v1/models");
+
+        // 1단계: 파일 업로드 요청 확인
         RecordedRequest fileRequest = mockWebServer.takeRequest();
         assertThat(fileRequest.getMethod()).isEqualTo("POST");
         assertThat(fileRequest.getPath()).isEqualTo("/v1/files");
 
-        // 배치 생성 요청 확인
+        // 2단계: 배치 생성 요청 확인
         RecordedRequest batchRequest = mockWebServer.takeRequest();
         assertThat(batchRequest.getMethod()).isEqualTo("POST");
         assertThat(batchRequest.getPath()).isEqualTo("/v1/batch");
@@ -88,9 +97,16 @@ class GrokBatchAdapterTest {
     @Test
     @DisplayName("submitBatch()는 systemPrompt가 있으면 system 메시지를 포함한다")
     void submitBatchWithSystemPrompt() throws InterruptedException {
+        // 0단계: validateApiKey()용 200 OK
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("[]")
+                .addHeader("Content-Type", "application/json"));
+        // 1단계: 파일 업로드 응답
         mockWebServer.enqueue(new MockResponse()
                 .setBody("{\"id\":\"file_sys\",\"object\":\"file\"}")
                 .addHeader("Content-Type", "application/json"));
+        // 2단계: 배치 생성 응답
         mockWebServer.enqueue(new MockResponse()
                 .setBody("{\"id\":\"batch_sys\"}")
                 .addHeader("Content-Type", "application/json"));
@@ -101,6 +117,10 @@ class GrokBatchAdapterTest {
 
         adapter.submitBatch(rows, "grok-2-latest");
 
+        // 0단계: ping 요청 확인
+        mockWebServer.takeRequest();
+
+        // 1단계: 파일 업로드 요청 확인
         RecordedRequest fileRequest = mockWebServer.takeRequest();
         String fileBody = fileRequest.getBody().readUtf8();
         assertThat(fileBody).contains("You are Grok.");
