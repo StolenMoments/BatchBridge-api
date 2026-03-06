@@ -300,33 +300,40 @@ class BatchJobServiceTest {
     }
 
     @Test
-    @DisplayName("결과를 CSV로 내보내면 올바른 헤더와 데이터가 포함된다")
-    void exportResultsToCsvSuccess() throws Exception {
+    @DisplayName("실패한 행만 CSV로 내보내면 FAIL 상태인 데이터만 포함된다")
+    void exportFailedRowsToCsvSuccess() throws Exception {
         // given
         Long jobId = 1L;
         Job job = Job.builder().id(jobId).name("test-job").build();
         Chunk chunk = Chunk.builder().id(10L).job(job).model("claude-3-5-sonnet").build();
-        Result result = Result.builder()
-                .rowIdentifier("row-1")
-                .prompt("test prompt")
+        Result successResult = Result.builder()
+                .rowIdentifier("row-success")
+                .prompt("success prompt")
                 .chunk(chunk)
                 .resultText("result text")
                 .status(Result.ResultStatus.SUCCESS)
-                .inputTokens(10)
-                .outputTokens(20)
+                .build();
+        Result failResult = Result.builder()
+                .rowIdentifier("row-fail")
+                .prompt("fail prompt")
+                .chunk(chunk)
+                .resultText(null)
+                .status(Result.ResultStatus.FAIL)
+                .errorMessage("some error")
                 .build();
 
         when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
-        when(resultRepository.findByJobId(jobId)).thenReturn(List.of(result));
+        when(resultRepository.findByJobId(jobId)).thenReturn(List.of(successResult, failResult));
 
         // when
-        byte[] csvBytes = batchJobService.exportResultsToCsv(jobId);
+        byte[] csvBytes = batchJobService.exportFailedRowsToCsv(jobId);
         String csvContent = new String(csvBytes, java.nio.charset.StandardCharsets.UTF_8);
 
         // then
         String[] lines = csvContent.split("\n");
-        // OpenCSV might add quotes or use different line endings, but basic check:
+        assertThat(lines).hasSize(2); // Header + 1 Fail Row
         assertThat(lines[0]).contains("id", "prompt", "result", "model", "input_tokens", "output_tokens", "status");
-        assertThat(lines[1]).contains("row-1", "test prompt", "result text", "claude-3-5-sonnet", "10", "20", "SUCCESS");
+        assertThat(lines[1]).contains("row-fail", "fail prompt", "claude-3-5-sonnet", "FAIL");
+        assertThat(csvContent).doesNotContain("row-success");
     }
 }

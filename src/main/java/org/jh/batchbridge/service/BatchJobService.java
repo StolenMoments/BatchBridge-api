@@ -345,7 +345,21 @@ public class BatchJobService {
     @Transactional(readOnly = true)
     public byte[] exportResultsToCsv(Long jobId) {
         List<MergedResultDto> results = getMergedResults(jobId);
+        return convertToCsv(results);
+    }
 
+    /**
+     * Job ID를 기반으로 실패한 행만 수집하고 CSV 형식의 byte[]로 변환한다.
+     */
+    @Transactional(readOnly = true)
+    public byte[] exportFailedRowsToCsv(Long jobId) {
+        List<MergedResultDto> results = getMergedResults(jobId).stream()
+                .filter(r -> "FAIL".equals(r.getStatus()))
+                .collect(Collectors.toList());
+        return convertToCsv(results);
+    }
+
+    private byte[] convertToCsv(List<MergedResultDto> results) {
         try (java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
              java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(out, java.nio.charset.StandardCharsets.UTF_8);
              com.opencsv.CSVWriter csvWriter = new com.opencsv.CSVWriter(writer)) {
