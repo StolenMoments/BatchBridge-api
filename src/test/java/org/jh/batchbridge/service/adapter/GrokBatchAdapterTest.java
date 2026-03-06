@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GrokBatchAdapterTest {
 
@@ -212,5 +213,77 @@ class GrokBatchAdapterTest {
         List<BaseBatchAdapter.BatchResultItem> results = adapter.collectResults("batch_grok123");
 
         assertThat(results).isEmpty();
+    }
+
+    @Test
+    @DisplayName("validateApiKey()는 401 응답 시 InvalidApiKeyException을 던진다")
+    void validateApiKeyThrowsOn401() {
+        mockWebServer.enqueue(new MockResponse().setResponseCode(401));
+
+        assertThatThrownBy(() -> adapter.validateApiKey())
+                .isInstanceOf(ApiKeyValidator.InvalidApiKeyException.class)
+                .hasMessageContaining("xai");
+    }
+
+    @Test
+    @DisplayName("validateApiKey()는 200 응답 시 예외를 던지지 않는다")
+    void validateApiKeyPassesOn200() throws InterruptedException {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"data\":[]}")
+                .addHeader("Content-Type", "application/json"));
+
+        adapter.validateApiKey();
+
+        RecordedRequest request = mockWebServer.takeRequest();
+        assertThat(request.getPath()).isEqualTo("/v1/models");
+    }
+
+    @Test
+    @DisplayName("submitBatch()는 배치 생성 시 429 응답 후 재시도하여 성공한다")
+    void submitBatchRetriesOnRateLimit() {
+        // ping 성공
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"data\":[]}")
+                .addHeader("Content-Type", "application/json"));
+        // 파일 업로드 성공
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"id\":\"file_retry\",\"object\":\"file\"}")
+                .addHeader("Content-Type", "application/json"));
+        // 배치 생성 429
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(429)
+                .addHeader("Content-Type", "application/json"));
+        // 배치 생성 성공
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"id\":\"batch_retry_grok\",\"status\":\"validating\"}")
+                .addHeader("Content-Type", "application/json"));
+
+        List<BatchRowDto> rows = List.of(
+                BatchRowDto.builder().id("row-1").prompt("Hello").build()
+        );
+
+        String batchId = adapter.submitBatch(rows, "grok-2-latest");
+
+        assertThat(batchId).isEqualTo("batch_retry_grok");
+    }
+
+    @Test
+    @DisplayName("submitBatch()는 API 키가 비어 있으면 IllegalStateException을 던진다")
+    void submitBatchThrowsWhenApiKeyEmpty() {
+        AiConfig emptyKeyConfig = new AiConfig();
+        AiConfig.ProviderConfig providerConfig = new AiConfig.ProviderConfig();
+        providerConfig.setApiKey("");
+        providerConfig.setModel("grok-2-latest");
+        emptyKeyConfig.setProviders(Map.of("xai", providerConfig));
+
+        GrokBatchAdapter emptyKeyAdapter = new GrokBatchAdapter(
+                emptyKeyConfig, WebClient.builder(), new ObjectMapper(),
+                mockWebServer.url("/").toString());
+
+        assertThatThrownBy(() -> emptyKeyAdapter.submitBatch(List.of(), "grok-2-latest"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("xai");
     }
 }

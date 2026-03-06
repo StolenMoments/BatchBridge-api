@@ -30,26 +30,27 @@ public class GrokBatchAdapter implements BaseBatchAdapter {
 
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
+    private final String apiKey;
     private final String defaultModel;
 
     @Autowired
     public GrokBatchAdapter(AiConfig aiConfig, WebClient.Builder webClientBuilder,
                             ObjectMapper objectMapper) {
         AiConfig.ProviderConfig config = aiConfig.getProviders().get(PROVIDER);
-        String apiKey = config != null ? config.getApiKey() : "";
+        this.apiKey = config != null ? config.getApiKey() : "";
         this.defaultModel = config != null ? config.getModel() : "grok-2-latest";
         this.objectMapper = objectMapper;
-        this.webClient = buildWebClient(webClientBuilder, BASE_URL, apiKey);
+        this.webClient = buildWebClient(webClientBuilder, BASE_URL, this.apiKey);
     }
 
     // 테스트에서 baseUrl을 오버라이드할 수 있도록 분리
     GrokBatchAdapter(AiConfig aiConfig, WebClient.Builder webClientBuilder,
                      ObjectMapper objectMapper, String baseUrl) {
         AiConfig.ProviderConfig config = aiConfig.getProviders().get(PROVIDER);
-        String apiKey = config != null ? config.getApiKey() : "";
+        this.apiKey = config != null ? config.getApiKey() : "";
         this.defaultModel = config != null ? config.getModel() : "grok-2-latest";
         this.objectMapper = objectMapper;
-        this.webClient = buildWebClient(webClientBuilder, baseUrl, apiKey);
+        this.webClient = buildWebClient(webClientBuilder, baseUrl, this.apiKey);
     }
 
     private static WebClient buildWebClient(WebClient.Builder builder, String baseUrl, String apiKey) {
@@ -60,8 +61,18 @@ public class GrokBatchAdapter implements BaseBatchAdapter {
                 .build();
     }
 
+    /**
+     * API 키 유효성을 사전 검증한다 (ping).
+     * 401/403 응답 시 {@link ApiKeyValidator.InvalidApiKeyException}을 던진다.
+     */
+    public void validateApiKey() {
+        ApiKeyValidator.validateNotEmpty(apiKey, PROVIDER);
+        ApiKeyValidator.ping(webClient, "/v1/models", PROVIDER);
+    }
+
     @Override
     public String submitBatch(List<BatchRowDto> rows, String model) {
+        validateApiKey();
         String resolvedModel = (model != null && !model.isBlank()) ? model : defaultModel;
 
         // 1단계: JSONL 파일 내용 생성
@@ -106,14 +117,15 @@ public class GrokBatchAdapter implements BaseBatchAdapter {
         batchBody.put("endpoint", "/v1/chat/completions");
         batchBody.put("completion_window", "24h");
 
-        JsonNode response = webClient.post()
-                .uri(BATCH_ENDPOINT)
-                .bodyValue(batchBody)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
-
-        return response != null ? response.path("id").asText() : null;
+        return RetryUtils.withRetry(() -> {
+            JsonNode response = webClient.post()
+                    .uri(BATCH_ENDPOINT)
+                    .bodyValue(batchBody)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+            return response != null ? response.path("id").asText() : null;
+        });
     }
 
     private String uploadBatchFile(String jsonlContent) {
@@ -139,11 +151,11 @@ public class GrokBatchAdapter implements BaseBatchAdapter {
 
     @Override
     public BatchStatus checkStatus(String externalBatchId) {
-        JsonNode response = webClient.get()
+        JsonNode response = RetryUtils.withRetry(() -> webClient.get()
                 .uri(BATCH_ENDPOINT + "/" + externalBatchId)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
-                .block();
+                .block());
 
         if (response == null) return BatchStatus.FAILED;
 

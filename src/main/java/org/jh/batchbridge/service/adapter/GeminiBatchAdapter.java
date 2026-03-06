@@ -57,8 +57,18 @@ public class GeminiBatchAdapter implements BaseBatchAdapter {
                 .build();
     }
 
+    /**
+     * API 키 유효성을 사전 검증한다 (ping).
+     * 401/403 응답 시 {@link ApiKeyValidator.InvalidApiKeyException}을 던진다.
+     */
+    public void validateApiKey() {
+        ApiKeyValidator.validateNotEmpty(apiKey, PROVIDER);
+        ApiKeyValidator.ping(webClient, "/v1beta/models?key=" + apiKey, PROVIDER);
+    }
+
     @Override
     public String submitBatch(List<BatchRowDto> rows, String model) {
+        validateApiKey();
         String resolvedModel = (model != null && !model.isBlank()) ? model : defaultModel;
 
         ObjectNode body = objectMapper.createObjectNode();
@@ -91,29 +101,30 @@ public class GeminiBatchAdapter implements BaseBatchAdapter {
             }
         }
 
-        JsonNode response = webClient.post()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/v1beta/models/{model}:batchGenerateContent")
-                        .queryParam("key", apiKey)
-                        .build(resolvedModel))
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
-
-        return response != null ? response.path("name").asText() : null;
+        return RetryUtils.withRetry(() -> {
+            JsonNode response = webClient.post()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/v1beta/models/{model}:batchGenerateContent")
+                            .queryParam("key", apiKey)
+                            .build(resolvedModel))
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+            return response != null ? response.path("name").asText() : null;
+        });
     }
 
     @Override
     public BatchStatus checkStatus(String externalBatchId) {
-        JsonNode response = webClient.get()
+        JsonNode response = RetryUtils.withRetry(() -> webClient.get()
                 .uri(uriBuilder -> uriBuilder
                         .path("/v1beta/{batchId}")
                         .queryParam("key", apiKey)
                         .build(externalBatchId))
                 .retrieve()
                 .bodyToMono(JsonNode.class)
-                .block();
+                .block());
 
         if (response == null) return BatchStatus.FAILED;
 

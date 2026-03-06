@@ -63,8 +63,18 @@ public class ClaudeBatchAdapter implements BaseBatchAdapter {
                 .build();
     }
 
+    /**
+     * API 키 유효성을 사전 검증한다 (ping).
+     * 401/403 응답 시 {@link ApiKeyValidator.InvalidApiKeyException}을 던진다.
+     */
+    public void validateApiKey() {
+        ApiKeyValidator.validateNotEmpty(apiKey, PROVIDER);
+        ApiKeyValidator.ping(webClient, "/v1/models", PROVIDER);
+    }
+
     @Override
     public String submitBatch(List<BatchRowDto> rows, String model) {
+        validateApiKey();
         String resolvedModel = (model != null && !model.isBlank()) ? model : defaultModel;
         ObjectNode body = objectMapper.createObjectNode();
         ArrayNode requests = body.putArray("requests");
@@ -93,23 +103,24 @@ public class ClaudeBatchAdapter implements BaseBatchAdapter {
             textBlock.put("text", row.getPrompt());
         }
 
-        JsonNode response = webClient.post()
-                .uri(BATCH_ENDPOINT)
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
-
-        return response != null ? response.path("id").asText() : null;
+        return RetryUtils.withRetry(() -> {
+            JsonNode response = webClient.post()
+                    .uri(BATCH_ENDPOINT)
+                    .bodyValue(body)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+            return response != null ? response.path("id").asText() : null;
+        });
     }
 
     @Override
     public BatchStatus checkStatus(String externalBatchId) {
-        JsonNode response = webClient.get()
+        JsonNode response = RetryUtils.withRetry(() -> webClient.get()
                 .uri(BATCH_ENDPOINT + "/" + externalBatchId)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
-                .block();
+                .block());
 
         if (response == null) return BatchStatus.FAILED;
 

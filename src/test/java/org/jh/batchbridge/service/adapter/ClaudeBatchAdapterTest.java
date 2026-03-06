@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class ClaudeBatchAdapterTest {
 
@@ -184,5 +185,73 @@ class ClaudeBatchAdapterTest {
         List<BaseBatchAdapter.BatchResultItem> results = adapter.collectResults("batch_abc123");
 
         assertThat(results).isEmpty();
+    }
+
+    @Test
+    @DisplayName("validateApiKey()는 401 응답 시 InvalidApiKeyException을 던진다")
+    void validateApiKeyThrowsOn401() {
+        mockWebServer.enqueue(new MockResponse().setResponseCode(401));
+
+        assertThatThrownBy(() -> adapter.validateApiKey())
+                .isInstanceOf(ApiKeyValidator.InvalidApiKeyException.class)
+                .hasMessageContaining("anthropic");
+    }
+
+    @Test
+    @DisplayName("validateApiKey()는 200 응답 시 예외를 던지지 않는다")
+    void validateApiKeyPassesOn200() throws InterruptedException {
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("[]")
+                .addHeader("Content-Type", "application/json"));
+
+        adapter.validateApiKey();
+
+        RecordedRequest request = mockWebServer.takeRequest();
+        assertThat(request.getPath()).isEqualTo("/v1/models");
+    }
+
+    @Test
+    @DisplayName("submitBatch()는 429 응답 후 재시도하여 성공한다")
+    void submitBatchRetriesOnRateLimit() throws InterruptedException {
+        // 첫 번째 요청: ping 성공
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(200)
+                .setBody("[]")
+                .addHeader("Content-Type", "application/json"));
+        // 두 번째 요청: 429 rate limit
+        mockWebServer.enqueue(new MockResponse()
+                .setResponseCode(429)
+                .addHeader("Content-Type", "application/json"));
+        // 세 번째 요청: 성공
+        mockWebServer.enqueue(new MockResponse()
+                .setBody("{\"id\":\"batch_retry123\"}")
+                .addHeader("Content-Type", "application/json"));
+
+        List<BatchRowDto> rows = List.of(
+                BatchRowDto.builder().id("row-1").prompt("Hello").build()
+        );
+
+        String batchId = adapter.submitBatch(rows, "claude-3-5-sonnet-latest");
+
+        assertThat(batchId).isEqualTo("batch_retry123");
+    }
+
+    @Test
+    @DisplayName("submitBatch()는 API 키가 비어 있으면 IllegalStateException을 던진다")
+    void submitBatchThrowsWhenApiKeyEmpty() {
+        AiConfig emptyKeyConfig = new AiConfig();
+        AiConfig.ProviderConfig providerConfig = new AiConfig.ProviderConfig();
+        providerConfig.setApiKey("");
+        providerConfig.setModel("claude-3-5-sonnet-latest");
+        emptyKeyConfig.setProviders(Map.of("anthropic", providerConfig));
+
+        ClaudeBatchAdapter emptyKeyAdapter = new ClaudeBatchAdapter(
+                emptyKeyConfig, WebClient.builder(), new ObjectMapper(),
+                mockWebServer.url("/").toString());
+
+        assertThatThrownBy(() -> emptyKeyAdapter.submitBatch(List.of(), "claude-3-5-sonnet-latest"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("anthropic");
     }
 }
