@@ -114,11 +114,8 @@ public class BatchController {
 
     @PostMapping("/batches/refresh")
     public ApiResponse<Map<String, Object>> refreshBatches() {
-        batchJobService.syncUnfinishedJobs();
-        
-        // 갱신된 내역을 반환해야 함. 기존 syncUnfinishedJobs는 반환값이 없으므로 
-        // 여기서는 간단히 성공 메시지만 혹은 최근 상태를 조회하여 반환. 
-        // 명세에 맞추기 위해 모든 Job 목록을 조회하여 반환하는 식으로 구성.
+        int syncedChunks = batchJobService.syncUnfinishedJobs();
+
         List<Job> jobs = jobRepository.findAll();
         List<Map<String, String>> jobStatuses = jobs.stream()
                 .map(j -> {
@@ -130,7 +127,7 @@ public class BatchController {
                 .collect(Collectors.toList());
 
         Map<String, Object> data = new HashMap<>();
-        data.put("updated", jobStatuses.size());
+        data.put("updated", syncedChunks);
         data.put("jobs", jobStatuses);
         
         return ApiResponse.success(data);

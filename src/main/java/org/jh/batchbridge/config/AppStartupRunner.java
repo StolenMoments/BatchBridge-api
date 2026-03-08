@@ -18,7 +18,8 @@ public class AppStartupRunner {
     public void onApplicationReady() {
         log.info("Application is ready. Syncing unfinished batch jobs...");
         try {
-            batchJobService.syncUnfinishedJobs();
+            int syncedChunks = batchJobService.syncUnfinishedJobs();
+            log.info("Initial synchronization finished. syncedChunks={}", syncedChunks);
         } catch (Exception e) {
             log.error("Error during initial batch job synchronization", e);
         }

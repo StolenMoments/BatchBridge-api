@@ -250,9 +250,10 @@ class BatchJobServiceTest {
         when(chunkRepository.findByJobId(1L)).thenReturn(List.of(chunk));
 
         // When
-        batchJobService.syncUnfinishedJobs();
+        int syncedChunks = batchJobService.syncUnfinishedJobs();
 
         // Then
+        assertThat(syncedChunks).isEqualTo(1);
         assertThat(chunk.getStatus()).isEqualTo(Chunk.ChunkStatus.COMPLETED);
         assertThat(result.getStatus()).isEqualTo(Result.ResultStatus.SUCCESS);
         assertThat(result.getResultText()).isEqualTo("response text");
@@ -283,9 +284,10 @@ class BatchJobServiceTest {
         when(chunkRepository.findByJobId(1L)).thenReturn(List.of(chunk));
 
         // When
-        batchJobService.syncUnfinishedJobs();
+        int syncedChunks = batchJobService.syncUnfinishedJobs();
 
         // Then
+        assertThat(syncedChunks).isEqualTo(1);
         assertThat(chunk.getStatus()).isEqualTo(Chunk.ChunkStatus.FAILED);
         assertThat(job.getStatus()).isEqualTo(Job.JobStatus.FAILED);
         verify(chunkRepository).save(chunk);
