@@ -8,7 +8,6 @@ import org.jh.batchbridge.dto.BatchRowDto;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -35,7 +34,7 @@ public class BatchRequestConverter {
     public List<BatchRequest> convertAll(List<BatchRowDto> rows, String defaultModel) {
         return rows.stream()
                 .map(row -> convert(row, defaultModel))
-                .collect(Collectors.toList());
+                .toList();
     }
 
     private String resolveModel(String rowModel, String defaultModel) {

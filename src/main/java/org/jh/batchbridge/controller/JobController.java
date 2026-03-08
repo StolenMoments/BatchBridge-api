@@ -45,7 +45,7 @@ public class JobController {
 
         List<JobListResponse.JobInfo> jobs = jobPage.getContent().stream()
                 .map(this::convertToJobInfo)
-                .collect(Collectors.toList());
+                .toList();
 
         JobListResponse response = JobListResponse.builder()
                 .total(jobPage.getTotalElements())
@@ -82,7 +82,7 @@ public class JobController {
                         .failedRows((int) c.getResults().stream().filter(r -> r.getStatus() == Result.ResultStatus.FAIL).count())
                         .status(c.getStatus().name().toLowerCase())
                         .build())
-                .collect(Collectors.toList());
+                .toList();
 
         JobDetailResponse response = JobDetailResponse.builder()
                 .jobId(job.getId().toString())
@@ -140,7 +140,7 @@ public class JobController {
         List<String> models = results.stream()
                 .map(Result::getModel)
                 .distinct()
-                .collect(Collectors.toList());
+                .toList();
 
         if (models.isEmpty()) {
             models = List.of(job.getModel());

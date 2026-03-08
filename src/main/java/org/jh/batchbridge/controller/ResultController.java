@@ -89,7 +89,7 @@ public class ResultController {
                             .cost(tokenEstimator.estimateCost(input, model))
                             .build();
                 })
-                .collect(Collectors.toList());
+                .toList();
 
         ReportResponse response = ReportResponse.builder()
                 .jobId(jobId.toString())

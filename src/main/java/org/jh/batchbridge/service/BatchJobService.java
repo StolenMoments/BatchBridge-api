@@ -29,6 +29,11 @@ import org.springframework.web.multipart.MultipartFile;
 @RequiredArgsConstructor
 public class BatchJobService {
 
+    private static final String PROVIDER_ANTHROPIC = "anthropic";
+    private static final String PROVIDER_GOOGLE = "google";
+    private static final String PROVIDER_XAI = "xai";
+    private static final String JOB_NOT_FOUND_PREFIX = "Job not found: ";
+
     private final List<BatchFileParser> parsers;
     private final JobRepository jobRepository;
     private final ResultRepository resultRepository;
@@ -38,11 +43,11 @@ public class BatchJobService {
     private final AiConfig aiConfig;
 
     @Transactional
-    public Job createJobFromUpload(MultipartFile file, String defaultModel) {
+    public void createJobFromUpload(MultipartFile file, String defaultModel) {
         validateUploadedFile(file);
         String fileName = file.getOriginalFilename();
         try (InputStream inputStream = file.getInputStream()) {
-            return createJobFromFile(fileName, inputStream, defaultModel, null);
+            internalCreateJobFromFile(fileName, inputStream, defaultModel, null);
         } catch (IOException e) {
             throw new InvalidFileUploadException(ErrorMessage.FILE_EMPTY, e);
         }
@@ -64,17 +69,21 @@ public class BatchJobService {
 
     @Transactional
     public Job createJobFromFile(String fileName, InputStream inputStream, String defaultModel) {
-        return createJobFromFile(fileName, inputStream, defaultModel, null);
+        return internalCreateJobFromFile(fileName, inputStream, defaultModel, null);
     }
 
     @Transactional
     public Job createJobFromFile(String fileName, InputStream inputStream, String defaultModel, String defaultSystemPrompt) {
+        return internalCreateJobFromFile(fileName, inputStream, defaultModel, defaultSystemPrompt);
+    }
+
+    private Job internalCreateJobFromFile(String fileName, InputStream inputStream, String defaultModel, String defaultSystemPrompt) {
         String resolvedDefaultModel = resolveConfiguredModel(defaultModel);
 
         BatchFileParser parser = parsers.stream()
-                .filter(p -> p.supports(fileName))
-                .findFirst()
-                .orElseThrow(() -> new InvalidFileUploadException(ErrorMessage.FILE_FORMAT_UNSUPPORTED));
+                                        .filter(p -> p.supports(fileName))
+                                        .findFirst()
+                                        .orElseThrow(() -> new InvalidFileUploadException(ErrorMessage.FILE_FORMAT_UNSUPPORTED));
 
         List<BatchRowDto> rows = parser.parse(inputStream);
         List<BatchRowDto> resolvedRows = applyDefaultSystemPrompt(rows, defaultSystemPrompt);
@@ -82,16 +91,16 @@ public class BatchJobService {
         int totalTokens = tokenEstimator.estimateTotalTokens(resolvedRows);
         double estimatedCost = tokenEstimator.estimateCost(totalTokens, resolvedDefaultModel);
         log.info("[TokenEstimate] file={}, rows={}, estimatedInputTokens={}, model={}, estimatedCost=${}",
-                fileName, resolvedRows.size(), totalTokens, resolvedDefaultModel, String.format("%.6f", estimatedCost));
+            fileName, resolvedRows.size(), totalTokens, resolvedDefaultModel, String.format("%.6f", estimatedCost));
 
         Job job = Job.builder()
-                .name(fileName)
-                .status(Job.JobStatus.PENDING)
-                .model(resolvedDefaultModel)
-                .totalRows(resolvedRows.size())
-                .completedRows(0)
-                .failedRows(0)
-                .build();
+                     .name(fileName)
+                     .status(Job.JobStatus.PENDING)
+                     .model(resolvedDefaultModel)
+                     .totalRows(resolvedRows.size())
+                     .completedRows(0)
+                     .failedRows(0)
+                     .build();
 
         Job savedJob = jobRepository.save(job);
 
@@ -102,7 +111,7 @@ public class BatchJobService {
             int batchLimit = tokenEstimator.resolveBatchLimit(model);
             List<List<BatchRowDto>> chunks = tokenEstimator.splitIntoChunks(modelRows, model);
             log.info("[ModelGroup] model={}, rows={}, estimatedInputTokens={}, estimatedCost=${}, batchLimit={}, chunks={}",
-                    model, modelRows.size(), modelTokens, String.format("%.6f", modelCost), batchLimit, chunks.size());
+                model, modelRows.size(), modelTokens, String.format("%.6f", modelCost), batchLimit, chunks.size());
             saveChunks(savedJob, model, chunks);
         });
 
@@ -113,7 +122,7 @@ public class BatchJobService {
     public void applyDefaultModelToJob(Long jobId, String defaultModel) {
         String resolvedDefaultModel = resolveConfiguredModel(defaultModel);
         Job job = jobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+                               .orElseThrow(() -> new IllegalArgumentException(JOB_NOT_FOUND_PREFIX + jobId));
 
         String previousDefaultModel = job.getModel();
         job.setModel(resolvedDefaultModel);
@@ -137,40 +146,37 @@ public class BatchJobService {
         }
     }
 
-    /**
-     * 청크 목록을 Chunk 엔티티로 저장하고, 각 행을 Result로 저장한다.
-     */
     private void saveChunks(Job job, String model, List<List<BatchRowDto>> chunkGroups) {
         String provider = resolveProvider(model);
         for (int i = 0; i < chunkGroups.size(); i++) {
             List<BatchRowDto> chunkRows = chunkGroups.get(i);
 
             Chunk chunk = Chunk.builder()
-                    .job(job)
-                    .provider(provider)
-                    .model(model)
-                    .status(Chunk.ChunkStatus.CREATED)
-                    .rowCount(chunkRows.size())
-                    .build();
+                               .job(job)
+                               .provider(provider)
+                               .model(model)
+                               .status(Chunk.ChunkStatus.CREATED)
+                               .rowCount(chunkRows.size())
+                               .build();
 
             Chunk savedChunk = chunkRepository.save(chunk);
 
             log.info("[ChunkCreated] jobId={}, chunkId={}, model={}, chunkIndex={}/{}, rows={}",
-                    job.getId(), savedChunk.getId(), model, i + 1, chunkGroups.size(), chunkRows.size());
+                job.getId(), savedChunk.getId(), model, i + 1, chunkGroups.size(), chunkRows.size());
 
             List<Result> results = chunkRows.stream()
-                    .map(row -> Result.builder()
-                            .job(job)
-                            .chunk(savedChunk)
-                            .rowIdentifier(row.getId())
-                            .prompt(row.getPrompt())
-                            .systemPrompt(row.getSystemPrompt())
-                            .model(model)
-                            .status(Result.ResultStatus.PENDING)
-                            .inputTokens(0)
-                            .outputTokens(0)
-                            .build())
-                    .collect(Collectors.toList());
+                                            .map(row -> Result.builder()
+                                                              .job(job)
+                                                              .chunk(savedChunk)
+                                                              .rowIdentifier(row.getId())
+                                                              .prompt(row.getPrompt())
+                                                              .systemPrompt(row.getSystemPrompt())
+                                                              .model(model)
+                                                              .status(Result.ResultStatus.PENDING)
+                                                              .inputTokens(0)
+                                                              .outputTokens(0)
+                                                              .build())
+                                            .toList();
 
             resultRepository.saveAll(results);
         }
@@ -182,29 +188,26 @@ public class BatchJobService {
         }
 
         return rows.stream()
-                .map(row -> {
-                    if (row.getSystemPrompt() != null && !row.getSystemPrompt().isBlank()) {
-                        return row;
-                    }
-                    return BatchRowDto.builder()
-                            .id(row.getId())
-                            .prompt(row.getPrompt())
-                            .model(row.getModel())
-                            .systemPrompt(defaultSystemPrompt)
-                            .temperature(row.getTemperature())
-                            .maxTokens(row.getMaxTokens())
-                            .build();
-                })
-                .collect(Collectors.toList());
+                   .map(row -> {
+                       if (row.getSystemPrompt() != null && !row.getSystemPrompt().isBlank()) {
+                           return row;
+                       }
+                       return BatchRowDto.builder()
+                                         .id(row.getId())
+                                         .prompt(row.getPrompt())
+                                         .model(row.getModel())
+                                         .systemPrompt(defaultSystemPrompt)
+                                         .temperature(row.getTemperature())
+                                         .maxTokens(row.getMaxTokens())
+                                         .build();
+                   })
+                   .toList();
     }
 
-    /**
-     * 특정 작업을 실행(API 제출)한다.
-     */
     @Transactional
     public void submitJob(Long jobId) {
         Job job = jobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+                               .orElseThrow(() -> new IllegalArgumentException(JOB_NOT_FOUND_PREFIX + jobId));
 
         if (job.getStatus() != Job.JobStatus.PENDING) {
             log.warn("[SubmitJob] Job is not in PENDING status. jobId={}, status={}", jobId, job.getStatus());
@@ -232,19 +235,19 @@ public class BatchJobService {
 
     private void submitChunk(Chunk chunk) {
         BaseBatchAdapter adapter = adapters.stream()
-                .filter(a -> a.getProvider().equalsIgnoreCase(chunk.getProvider()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No adapter found for provider: " + chunk.getProvider()));
+                                           .filter(a -> a.getProvider().equalsIgnoreCase(chunk.getProvider()))
+                                           .findFirst()
+                                           .orElseThrow(() -> new IllegalStateException("No adapter found for provider: " + chunk.getProvider()));
 
         List<Result> results = resultRepository.findByChunkId(chunk.getId());
         List<BatchRowDto> rows = results.stream()
-                .map(r -> BatchRowDto.builder()
-                        .id(r.getRowIdentifier())
-                        .prompt(r.getPrompt())
-                        .systemPrompt(r.getSystemPrompt())
-                        .model(chunk.getModel())
-                        .build())
-                .collect(Collectors.toList());
+                                        .map(r -> BatchRowDto.builder()
+                                                             .id(r.getRowIdentifier())
+                                                             .prompt(r.getPrompt())
+                                                             .systemPrompt(r.getSystemPrompt())
+                                                             .model(chunk.getModel())
+                                                             .build())
+                                        .toList();
 
         String externalBatchId = adapter.submitBatch(rows, chunk.getModel());
 
@@ -253,12 +256,9 @@ public class BatchJobService {
         chunkRepository.save(chunk);
 
         log.info("[ChunkSubmitted] jobId={}, chunkId={}, externalBatchId={}",
-                chunk.getJob().getId(), chunk.getId(), externalBatchId);
+            chunk.getJob().getId(), chunk.getId(), externalBatchId);
     }
 
-    /**
-     * 앱 시작 시 미완료된(SUBMITTED 상태) 청크들의 상태를 동기화한다.
-     */
     @Transactional
     public int syncUnfinishedJobs() {
         log.info("[SyncUnfinishedJobs] Starting synchronization of unfinished chunks...");
@@ -284,9 +284,9 @@ public class BatchJobService {
 
     private void syncChunkStatus(Chunk chunk) {
         BaseBatchAdapter adapter = adapters.stream()
-                .filter(a -> a.getProvider().equalsIgnoreCase(chunk.getProvider()))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("No adapter found for provider: " + chunk.getProvider()));
+                                           .filter(a -> a.getProvider().equalsIgnoreCase(chunk.getProvider()))
+                                           .findFirst()
+                                           .orElseThrow(() -> new IllegalStateException("No adapter found for provider: " + chunk.getProvider()));
 
         BaseBatchAdapter.BatchStatus status = adapter.checkStatus(chunk.getExternalBatchId());
         log.info("[SyncChunkStatus] chunkId={}, externalId={}, status={}", chunk.getId(), chunk.getExternalBatchId(), status);
@@ -308,7 +308,7 @@ public class BatchJobService {
 
         for (BaseBatchAdapter.BatchResultItem item : results) {
             Result result = resultRepository.findByChunkIdAndRowIdentifier(chunk.getId(), item.rowId())
-                    .orElse(null);
+                                            .orElse(null);
 
             if (result == null) {
                 log.warn("[ProcessCompletedChunk] Result record not found. chunkId={}, rowId={}", chunk.getId(), item.rowId());
@@ -343,7 +343,7 @@ public class BatchJobService {
     private void updateJobStatusAfterChunkUpdate(Job job) {
         List<Chunk> chunks = chunkRepository.findByJobId(job.getId());
         boolean allFinished = chunks.stream()
-                .allMatch(c -> c.getStatus() == Chunk.ChunkStatus.COMPLETED || c.getStatus() == Chunk.ChunkStatus.FAILED);
+                                    .allMatch(c -> c.getStatus() == Chunk.ChunkStatus.COMPLETED || c.getStatus() == Chunk.ChunkStatus.FAILED);
 
         if (allFinished) {
             boolean anyFailed = chunks.stream().anyMatch(c -> c.getStatus() == Chunk.ChunkStatus.FAILED);
@@ -354,29 +354,22 @@ public class BatchJobService {
         jobRepository.save(job);
     }
 
-    /**
-     * 모델명으로 provider(API 제공사)를 결정한다.
-     */
     public String resolveProvider(String model) {
         if (model == null) return "unknown";
         String lower = model.toLowerCase();
-        if (lower.startsWith("claude")) return "anthropic";
-        if (lower.startsWith("gemini")) return "google";
-        if (lower.startsWith("grok")) return "xai";
+        if (lower.startsWith("claude")) return PROVIDER_ANTHROPIC;
+        if (lower.startsWith("gemini")) return PROVIDER_GOOGLE;
+        if (lower.startsWith("grok")) return PROVIDER_XAI;
         return "unknown";
     }
 
-    /**
-     * 행 목록을 model 컬럼 기준으로 그룹화한다.
-     * 행에 model이 없으면 defaultModel을 사용한다 (혼합 배치 지원).
-     */
     public Map<String, List<BatchRowDto>> groupRowsByModel(List<BatchRowDto> rows, String defaultModel) {
         return rows.stream()
-                .collect(Collectors.groupingBy(row ->
-                        (row.getModel() != null && !row.getModel().isBlank())
-                                ? row.getModel()
-                                : defaultModel
-                ));
+                   .collect(Collectors.groupingBy(row ->
+                       (row.getModel() != null && !row.getModel().isBlank())
+                           ? row.getModel()
+                           : defaultModel
+                   ));
     }
 
     private String resolveConfiguredModel(String defaultModel) {
@@ -386,9 +379,9 @@ public class BatchJobService {
 
         String normalized = defaultModel.trim().toLowerCase();
         String providerKey = switch (normalized) {
-            case "claude", "anthropic" -> "anthropic";
-            case "gemini", "google" -> "google";
-            case "grok", "xai" -> "xai";
+            case "claude", PROVIDER_ANTHROPIC -> PROVIDER_ANTHROPIC;
+            case "gemini", PROVIDER_GOOGLE -> PROVIDER_GOOGLE;
+            case "grok", PROVIDER_XAI -> PROVIDER_XAI;
             default -> null;
         };
 
@@ -414,75 +407,70 @@ public class BatchJobService {
         return currentModel.trim().equalsIgnoreCase(previousDefaultModel.trim());
     }
 
-    /**
-     * Job ID를 기반으로 모든 모델의 결과를 수집하고 원본 입력 정보와 병합한다.
-     */
     @Transactional(readOnly = true)
     public List<MergedResultDto> getMergedResults(Long jobId) {
-        Job job = jobRepository.findById(jobId)
-                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+        return internalGetMergedResults(jobId);
+    }
+
+    private List<MergedResultDto> internalGetMergedResults(Long jobId) {
+        if (!jobRepository.existsById(jobId)) {
+            throw new IllegalArgumentException(JOB_NOT_FOUND_PREFIX + jobId);
+        }
 
         List<Result> results = resultRepository.findByJobId(jobId);
 
         return results.stream()
-                .map(r -> MergedResultDto.builder()
-                        .rowId(r.getId().toString())
-                        .customId(r.getRowIdentifier())
-                        .prompt(r.getPrompt())
-                        .model(r.getModel())
-                        .resultText(r.getResultText())
-                        .status(r.getStatus().name())
-                        .inputTokens(r.getInputTokens())
-                        .outputTokens(r.getOutputTokens())
-                        .errorMessage(r.getErrorMessage())
-                        .build())
-                .collect(Collectors.toList());
+                      .map(r -> MergedResultDto.builder()
+                                               .rowId(r.getId().toString())
+                                               .customId(r.getRowIdentifier())
+                                               .prompt(r.getPrompt())
+                                               .model(r.getModel())
+                                               .resultText(r.getResultText())
+                                               .status(r.getStatus().name())
+                                               .inputTokens(r.getInputTokens())
+                                               .outputTokens(r.getOutputTokens())
+                                               .errorMessage(r.getErrorMessage())
+                                               .build())
+                      .toList();
     }
 
-    /**
-     * Job ID를 기반으로 모든 모델의 결과를 수집하고 CSV 형식의 byte[]로 변환한다.
-     */
     @Transactional(readOnly = true)
     public byte[] exportResultsToCsv(Long jobId) {
-        List<MergedResultDto> results = getMergedResults(jobId);
+        List<MergedResultDto> results = internalGetMergedResults(jobId);
         return convertToCsv(results);
     }
 
-    /**
-     * Job ID를 기반으로 실패한 행만 수집하고 CSV 형식의 byte[]로 변환한다.
-     */
     @Transactional(readOnly = true)
     public byte[] exportFailedRowsToCsv(Long jobId) {
-        List<MergedResultDto> results = getMergedResults(jobId).stream()
-                .filter(r -> "FAIL".equals(r.getStatus()))
-                .collect(Collectors.toList());
+        List<MergedResultDto> results = internalGetMergedResults(jobId).stream()
+                                                                       .filter(r -> "FAIL".equals(r.getStatus()))
+                                                                       .toList();
         return convertToCsv(results);
     }
 
     private byte[] convertToCsv(List<MergedResultDto> results) {
         try (java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-             java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(out, java.nio.charset.StandardCharsets.UTF_8);
-             com.opencsv.CSVWriter csvWriter = new com.opencsv.CSVWriter(writer)) {
+            java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(out, java.nio.charset.StandardCharsets.UTF_8);
+            com.opencsv.CSVWriter csvWriter = new com.opencsv.CSVWriter(writer)) {
 
-            // Header: row_id, custom_id, prompt, result, model, input_tokens, output_tokens, status
             csvWriter.writeNext(new String[]{"row_id", "custom_id", "prompt", "result", "model", "input_tokens", "output_tokens", "status"});
 
             for (MergedResultDto result : results) {
                 csvWriter.writeNext(new String[]{
-                        result.getRowId(),
-                        result.getCustomId(),
-                        result.getPrompt(),
-                        result.getResultText(),
-                        result.getModel(),
-                        String.valueOf(result.getInputTokens() != null ? result.getInputTokens() : 0),
-                        String.valueOf(result.getOutputTokens() != null ? result.getOutputTokens() : 0),
-                        result.getStatus()
+                    result.getRowId(),
+                    result.getCustomId(),
+                    result.getPrompt(),
+                    result.getResultText(),
+                    result.getModel(),
+                    String.valueOf(result.getInputTokens() != null ? result.getInputTokens() : 0),
+                    String.valueOf(result.getOutputTokens() != null ? result.getOutputTokens() : 0),
+                    result.getStatus()
                 });
             }
             csvWriter.flush();
             return out.toByteArray();
         } catch (java.io.IOException e) {
-            throw new RuntimeException("Failed to generate CSV file", e);
+            throw new IllegalStateException("Failed to generate CSV file", e);
         }
     }
 }
