@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jh.batchbridge.config.AiConfig;
 import org.jh.batchbridge.domain.Chunk;
 import org.jh.batchbridge.domain.Job;
 import org.jh.batchbridge.domain.Result;
@@ -34,6 +35,7 @@ public class BatchJobService {
     private final ChunkRepository chunkRepository;
     private final TokenEstimator tokenEstimator;
     private final List<BaseBatchAdapter> adapters;
+    private final AiConfig aiConfig;
 
     @Transactional
     public Job createJobFromUpload(MultipartFile file, String defaultModel) {
@@ -62,6 +64,8 @@ public class BatchJobService {
 
     @Transactional
     public Job createJobFromFile(String fileName, InputStream inputStream, String defaultModel) {
+        String resolvedDefaultModel = resolveConfiguredModel(defaultModel);
+
         BatchFileParser parser = parsers.stream()
                 .filter(p -> p.supports(fileName))
                 .findFirst()
@@ -70,14 +74,14 @@ public class BatchJobService {
         List<BatchRowDto> rows = parser.parse(inputStream);
 
         int totalTokens = tokenEstimator.estimateTotalTokens(rows);
-        double estimatedCost = tokenEstimator.estimateCost(totalTokens, defaultModel);
+        double estimatedCost = tokenEstimator.estimateCost(totalTokens, resolvedDefaultModel);
         log.info("[TokenEstimate] file={}, rows={}, estimatedInputTokens={}, model={}, estimatedCost=${}",
-                fileName, rows.size(), totalTokens, defaultModel, String.format("%.6f", estimatedCost));
+                fileName, rows.size(), totalTokens, resolvedDefaultModel, String.format("%.6f", estimatedCost));
 
         Job job = Job.builder()
                 .name(fileName)
                 .status(Job.JobStatus.PENDING)
-                .model(defaultModel)
+                .model(resolvedDefaultModel)
                 .totalRows(rows.size())
                 .completedRows(0)
                 .failedRows(0)
@@ -85,7 +89,7 @@ public class BatchJobService {
 
         Job savedJob = jobRepository.save(job);
 
-        Map<String, List<BatchRowDto>> rowsByModel = groupRowsByModel(rows, defaultModel);
+        Map<String, List<BatchRowDto>> rowsByModel = groupRowsByModel(rows, resolvedDefaultModel);
         rowsByModel.forEach((model, modelRows) -> {
             int modelTokens = tokenEstimator.estimateTotalTokens(modelRows);
             double modelCost = tokenEstimator.estimateCost(modelTokens, model);
@@ -97,6 +101,34 @@ public class BatchJobService {
         });
 
         return savedJob;
+    }
+
+    @Transactional
+    public void applyDefaultModelToJob(Long jobId, String defaultModel) {
+        String resolvedDefaultModel = resolveConfiguredModel(defaultModel);
+        Job job = jobRepository.findById(jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Job not found: " + jobId));
+
+        String previousDefaultModel = job.getModel();
+        job.setModel(resolvedDefaultModel);
+        jobRepository.save(job);
+
+        List<Chunk> chunks = chunkRepository.findByJobId(jobId);
+        for (Chunk chunk : chunks) {
+            if (shouldReplaceModel(chunk.getModel(), previousDefaultModel)) {
+                chunk.setModel(resolvedDefaultModel);
+                chunk.setProvider(resolveProvider(resolvedDefaultModel));
+                chunkRepository.save(chunk);
+            }
+        }
+
+        List<Result> results = resultRepository.findByJobId(jobId);
+        for (Result result : results) {
+            if (shouldReplaceModel(result.getModel(), previousDefaultModel)) {
+                result.setModel(resolvedDefaultModel);
+                resultRepository.save(result);
+            }
+        }
     }
 
     /**
@@ -312,6 +344,41 @@ public class BatchJobService {
                                 ? row.getModel()
                                 : defaultModel
                 ));
+    }
+
+    private String resolveConfiguredModel(String defaultModel) {
+        if (defaultModel == null || defaultModel.isBlank()) {
+            return defaultModel;
+        }
+
+        String normalized = defaultModel.trim().toLowerCase();
+        String providerKey = switch (normalized) {
+            case "claude", "anthropic" -> "anthropic";
+            case "gemini", "google" -> "google";
+            case "grok", "xai" -> "xai";
+            default -> null;
+        };
+
+        if (providerKey == null || aiConfig.getProviders() == null) {
+            return defaultModel.trim();
+        }
+
+        AiConfig.ProviderConfig providerConfig = aiConfig.getProviders().get(providerKey);
+        if (providerConfig == null || providerConfig.getModel() == null || providerConfig.getModel().isBlank()) {
+            return defaultModel.trim();
+        }
+
+        return providerConfig.getModel().trim();
+    }
+
+    private boolean shouldReplaceModel(String currentModel, String previousDefaultModel) {
+        if (currentModel == null || currentModel.isBlank()) {
+            return true;
+        }
+        if (previousDefaultModel == null || previousDefaultModel.isBlank()) {
+            return false;
+        }
+        return currentModel.trim().equalsIgnoreCase(previousDefaultModel.trim());
     }
 
     /**
