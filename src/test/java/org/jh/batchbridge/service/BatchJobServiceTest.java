@@ -63,7 +63,6 @@ class BatchJobServiceTest {
     @BeforeEach
     void setUp() {
         batchJobService = new BatchJobService(List.of(csvParser), jobRepository, resultRepository, chunkRepository, tokenEstimator, List.of(adapter), aiConfig);
-        when(aiConfig.getProviders()).thenReturn(Map.of());
     }
 
     @Test
