@@ -230,23 +230,26 @@ public class BatchJobService {
      * 앱 시작 시 미완료된(SUBMITTED 상태) 청크들의 상태를 동기화한다.
      */
     @Transactional
-    public void syncUnfinishedJobs() {
+    public int syncUnfinishedJobs() {
         log.info("[SyncUnfinishedJobs] Starting synchronization of unfinished chunks...");
         List<Chunk> submittedChunks = chunkRepository.findByStatus(Chunk.ChunkStatus.SUBMITTED);
 
         if (submittedChunks.isEmpty()) {
             log.info("[SyncUnfinishedJobs] No unfinished chunks found.");
-            return;
+            return 0;
         }
 
+        int syncedCount = 0;
         for (Chunk chunk : submittedChunks) {
             try {
                 syncChunkStatus(chunk);
+                syncedCount++;
             } catch (Exception e) {
                 log.error("[SyncUnfinishedJobs] Failed to sync chunk status. chunkId={}, error={}", chunk.getId(), e.getMessage());
             }
         }
-        log.info("[SyncUnfinishedJobs] Synchronization completed.");
+        log.info("[SyncUnfinishedJobs] Synchronization completed. syncedChunks={}", syncedCount);
+        return syncedCount;
     }
 
     private void syncChunkStatus(Chunk chunk) {
