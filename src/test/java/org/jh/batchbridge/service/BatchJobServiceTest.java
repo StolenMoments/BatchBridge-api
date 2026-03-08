@@ -30,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
@@ -115,6 +116,34 @@ class BatchJobServiceTest {
         Job job = batchJobService.createJobFromFile("test.csv", new ByteArrayInputStream("x".getBytes()), "claude");
 
         assertThat(job.getModel()).isEqualTo("claude-haiku-4-5");
+    }
+
+
+    @Test
+    @DisplayName("업로드 기본 systemPrompt는 행에 없을 때만 적용된다")
+    void createJobFromFileAppliesDefaultSystemPrompt() {
+        when(csvParser.supports("test.csv")).thenReturn(true);
+        List<BatchRowDto> rows = List.of(
+                BatchRowDto.builder().id("1").prompt("p1").build(),
+                BatchRowDto.builder().id("2").prompt("p2").systemPrompt("row prompt").build()
+        );
+        when(csvParser.parse(any(InputStream.class))).thenReturn(rows);
+        when(tokenEstimator.estimateTotalTokens(anyList())).thenReturn(100);
+        when(tokenEstimator.estimateCost(100, "claude-3")).thenReturn(0.001d);
+        when(tokenEstimator.resolveBatchLimit("claude-3")).thenReturn(1000);
+        when(tokenEstimator.splitIntoChunks(anyList(), anyString()))
+                .thenAnswer(invocation -> List.of(invocation.getArgument(0)));
+        when(jobRepository.save(any(Job.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(chunkRepository.save(any(Chunk.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        batchJobService.createJobFromFile("test.csv", new ByteArrayInputStream("x".getBytes()), "claude-3", "default prompt");
+
+        ArgumentCaptor<List<Result>> resultCaptor = ArgumentCaptor.forClass((Class) List.class);
+        verify(resultRepository).saveAll(resultCaptor.capture());
+        List<Result> savedResults = resultCaptor.getValue();
+        assertThat(savedResults).hasSize(2);
+        assertThat(savedResults.get(0).getSystemPrompt()).isEqualTo("default prompt");
+        assertThat(savedResults.get(1).getSystemPrompt()).isEqualTo("row prompt");
     }
 
     @Test
@@ -207,7 +236,7 @@ class BatchJobServiceTest {
         Long jobId = 1L;
         Job job = Job.builder().id(jobId).status(Job.JobStatus.PENDING).build();
         Chunk chunk = Chunk.builder().id(10L).job(job).provider("anthropic").model("claude-3").status(Chunk.ChunkStatus.CREATED).build();
-        Result result = Result.builder().id(100L).chunk(chunk).job(job).rowIdentifier("row-1").prompt("hello").build();
+        Result result = Result.builder().id(100L).chunk(chunk).job(job).rowIdentifier("row-1").prompt("hello").systemPrompt("be helpful").build();
 
         when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
         when(chunkRepository.findByJobId(jobId)).thenReturn(List.of(chunk));
@@ -222,6 +251,13 @@ class BatchJobServiceTest {
         assertThat(chunk.getExternalBatchId()).isEqualTo("ext-batch-123");
         assertThat(chunk.getStatus()).isEqualTo(Chunk.ChunkStatus.SUBMITTED);
         assertThat(job.getStatus()).isEqualTo(Job.JobStatus.PROCESSING);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<BatchRowDto>> rowsCaptor = ArgumentCaptor.forClass((Class) List.class);
+        verify(adapter).submitBatch(rowsCaptor.capture(), anyString());
+        assertThat(rowsCaptor.getValue()).hasSize(1);
+        assertThat(rowsCaptor.getValue().getFirst().getSystemPrompt()).isEqualTo("be helpful");
+
         verify(chunkRepository).save(chunk);
         verify(jobRepository).save(job);
     }

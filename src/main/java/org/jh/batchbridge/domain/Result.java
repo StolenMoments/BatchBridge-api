@@ -34,6 +34,9 @@ public class Result {
     private String prompt;
 
     @Column(columnDefinition = "TEXT")
+    private String systemPrompt;
+
+    @Column(columnDefinition = "TEXT")
     private String resultText;
 
     @Enumerated(EnumType.STRING)

@@ -42,7 +42,7 @@ public class BatchJobService {
         validateUploadedFile(file);
         String fileName = file.getOriginalFilename();
         try (InputStream inputStream = file.getInputStream()) {
-            return createJobFromFile(fileName, inputStream, defaultModel);
+            return createJobFromFile(fileName, inputStream, defaultModel, null);
         } catch (IOException e) {
             throw new InvalidFileUploadException(ErrorMessage.FILE_EMPTY, e);
         }
@@ -64,6 +64,11 @@ public class BatchJobService {
 
     @Transactional
     public Job createJobFromFile(String fileName, InputStream inputStream, String defaultModel) {
+        return createJobFromFile(fileName, inputStream, defaultModel, null);
+    }
+
+    @Transactional
+    public Job createJobFromFile(String fileName, InputStream inputStream, String defaultModel, String defaultSystemPrompt) {
         String resolvedDefaultModel = resolveConfiguredModel(defaultModel);
 
         BatchFileParser parser = parsers.stream()
@@ -72,24 +77,25 @@ public class BatchJobService {
                 .orElseThrow(() -> new InvalidFileUploadException(ErrorMessage.FILE_FORMAT_UNSUPPORTED));
 
         List<BatchRowDto> rows = parser.parse(inputStream);
+        List<BatchRowDto> resolvedRows = applyDefaultSystemPrompt(rows, defaultSystemPrompt);
 
-        int totalTokens = tokenEstimator.estimateTotalTokens(rows);
+        int totalTokens = tokenEstimator.estimateTotalTokens(resolvedRows);
         double estimatedCost = tokenEstimator.estimateCost(totalTokens, resolvedDefaultModel);
         log.info("[TokenEstimate] file={}, rows={}, estimatedInputTokens={}, model={}, estimatedCost=${}",
-                fileName, rows.size(), totalTokens, resolvedDefaultModel, String.format("%.6f", estimatedCost));
+                fileName, resolvedRows.size(), totalTokens, resolvedDefaultModel, String.format("%.6f", estimatedCost));
 
         Job job = Job.builder()
                 .name(fileName)
                 .status(Job.JobStatus.PENDING)
                 .model(resolvedDefaultModel)
-                .totalRows(rows.size())
+                .totalRows(resolvedRows.size())
                 .completedRows(0)
                 .failedRows(0)
                 .build();
 
         Job savedJob = jobRepository.save(job);
 
-        Map<String, List<BatchRowDto>> rowsByModel = groupRowsByModel(rows, resolvedDefaultModel);
+        Map<String, List<BatchRowDto>> rowsByModel = groupRowsByModel(resolvedRows, resolvedDefaultModel);
         rowsByModel.forEach((model, modelRows) -> {
             int modelTokens = tokenEstimator.estimateTotalTokens(modelRows);
             double modelCost = tokenEstimator.estimateCost(modelTokens, model);
@@ -158,6 +164,7 @@ public class BatchJobService {
                             .chunk(savedChunk)
                             .rowIdentifier(row.getId())
                             .prompt(row.getPrompt())
+                            .systemPrompt(row.getSystemPrompt())
                             .model(model)
                             .status(Result.ResultStatus.PENDING)
                             .inputTokens(0)
@@ -167,6 +174,28 @@ public class BatchJobService {
 
             resultRepository.saveAll(results);
         }
+    }
+
+    private List<BatchRowDto> applyDefaultSystemPrompt(List<BatchRowDto> rows, String defaultSystemPrompt) {
+        if (defaultSystemPrompt == null || defaultSystemPrompt.isBlank()) {
+            return rows;
+        }
+
+        return rows.stream()
+                .map(row -> {
+                    if (row.getSystemPrompt() != null && !row.getSystemPrompt().isBlank()) {
+                        return row;
+                    }
+                    return BatchRowDto.builder()
+                            .id(row.getId())
+                            .prompt(row.getPrompt())
+                            .model(row.getModel())
+                            .systemPrompt(defaultSystemPrompt)
+                            .temperature(row.getTemperature())
+                            .maxTokens(row.getMaxTokens())
+                            .build();
+                })
+                .collect(Collectors.toList());
     }
 
     /**
@@ -212,6 +241,7 @@ public class BatchJobService {
                 .map(r -> BatchRowDto.builder()
                         .id(r.getRowIdentifier())
                         .prompt(r.getPrompt())
+                        .systemPrompt(r.getSystemPrompt())
                         .model(chunk.getModel())
                         .build())
                 .collect(Collectors.toList());
