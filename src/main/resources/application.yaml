@@ -22,10 +22,10 @@ ai:
   providers:
     google:
       api-key: ${GOOGLE_API_KEY:}
-      model: ${GOOGLE_MODEL:gemini-1.5-flash}
+      model: ${GOOGLE_MODEL:gemini-3-flash-preview}
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
-      model: ${ANTHROPIC_MODEL:claude-3-5-sonnet-latest}
+      model: ${ANTHROPIC_MODEL:claude-haiku-4-5}
     xai:
       api-key: ${XAI_API_KEY:}
-      model: ${XAI_MODEL:grok-2-latest}
+      model: ${XAI_MODEL:grok-4-1-fast-reasoning}
