@@ -5,7 +5,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.jh.batchbridge.domain.Job;
 import org.jh.batchbridge.dto.BatchRowDto;
@@ -72,7 +71,7 @@ public class BatchController {
                 .filename(file.getOriginalFilename())
                 .totalRows(rows.size())
                 .columns(Arrays.asList("custom_id", "prompt", "model", "system_prompt"))
-                .preview(rows.stream().limit(5).collect(Collectors.toList()))
+                .preview(rows.stream().limit(5).toList())
                 .estimatedTokens(estimatedTokens)
                 .estimatedCost(estimatedCosts)
                 .build();
@@ -100,7 +99,7 @@ public class BatchController {
                         .rows(c.getRowCount())
                         .batchId(c.getExternalBatchId())
                         .build())
-                .collect(Collectors.toList());
+                .toList();
 
         BatchSubmitResponse response = BatchSubmitResponse.builder()
                 .jobId(job.getId().toString())
@@ -124,7 +123,7 @@ public class BatchController {
                     map.put("status", j.getStatus().name().toLowerCase());
                     return map;
                 })
-                .collect(Collectors.toList());
+                .toList();
 
         Map<String, Object> data = new HashMap<>();
         data.put("updated", syncedChunks);
