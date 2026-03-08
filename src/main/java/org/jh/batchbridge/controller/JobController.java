@@ -1,9 +1,11 @@
 package org.jh.batchbridge.controller;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.jh.batchbridge.domain.Job;
+import org.jh.batchbridge.domain.Job.JobStatus;
 import org.jh.batchbridge.domain.Result;
 import org.jh.batchbridge.dto.api.ApiResponse;
 import org.jh.batchbridge.dto.api.JobDetailResponse;
@@ -36,8 +38,10 @@ public class JobController {
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "20") int size) {
 
-        // 필터링 로직은 생략하거나 구현 가능하나, 여기서는 단순 페이징만 적용
-        Page<Job> jobPage = jobRepository.findAll(PageRequest.of(page, size));
+        JobStatus statusFilter = parseStatus(status);
+        String modelFilter = normalizeFilter(model);
+
+        Page<Job> jobPage = jobRepository.findByModelAndStatus(modelFilter, statusFilter, PageRequest.of(page, size));
 
         List<JobListResponse.JobInfo> jobs = jobPage.getContent().stream()
                 .map(this::convertToJobInfo)
@@ -99,6 +103,26 @@ public class JobController {
     public ApiResponse<java.util.Map<String, String>> deleteJob(@PathVariable("jobId") Long jobId) {
         jobRepository.deleteById(jobId);
         return ApiResponse.success(java.util.Map.of("deleted", jobId.toString()));
+    }
+
+    private String normalizeFilter(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private JobStatus parseStatus(String status) {
+        String normalizedStatus = normalizeFilter(status);
+        if (normalizedStatus == null) {
+            return null;
+        }
+
+        try {
+            return JobStatus.valueOf(normalizedStatus.toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalArgumentException("Invalid status value: " + status);
+        }
     }
 
     private JobListResponse.JobInfo convertToJobInfo(Job job) {
