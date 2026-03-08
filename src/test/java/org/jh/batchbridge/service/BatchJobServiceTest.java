@@ -461,8 +461,7 @@ class BatchJobServiceTest {
                               .inputTokens(10)
                               .outputTokens(20)
                               .build();
-
-        when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
+        when(jobRepository.existsById(jobId)).thenReturn(true);
         when(resultRepository.findByJobId(jobId)).thenReturn(List.of(result));
 
         // when
@@ -515,7 +514,7 @@ class BatchJobServiceTest {
                                   .errorMessage("some error")
                                   .build();
 
-        when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
+        when(jobRepository.existsById(jobId)).thenReturn(true);
         when(resultRepository.findByJobId(jobId)).thenReturn(List.of(successResult, failResult));
 
         // when

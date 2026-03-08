@@ -43,11 +43,11 @@ public class BatchJobService {
     private final AiConfig aiConfig;
 
     @Transactional
-    public void createJobFromUpload(MultipartFile file, String defaultModel) {
+    public Job createJobFromUpload(MultipartFile file, String defaultModel) {
         validateUploadedFile(file);
         String fileName = file.getOriginalFilename();
         try (InputStream inputStream = file.getInputStream()) {
-            internalCreateJobFromFile(fileName, inputStream, defaultModel, null);
+            return internalCreateJobFromFile(fileName, inputStream, defaultModel, null);
         } catch (IOException e) {
             throw new InvalidFileUploadException(ErrorMessage.FILE_EMPTY, e);
         }
