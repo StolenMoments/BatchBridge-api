@@ -83,9 +83,12 @@ public class BatchController {
     @PostMapping("/batches")
     public ApiResponse<BatchSubmitResponse> submitBatch(@RequestBody Map<String, String> request) {
         Long jobId = Long.parseLong(request.get("uploadId"));
-        // API 명세에는 defaultModel, systemPrompt도 있으나 이미 업로드 시점에 설정됨. 
-        // 필요하다면 여기서 다시 업데이트 로직이 필요할 수 있으나 기존 BatchJobService는 submitJob(jobId)만 지원함.
-        
+        String defaultModel = request.get("defaultModel");
+
+        if (defaultModel != null && !defaultModel.isBlank()) {
+            batchJobService.applyDefaultModelToJob(jobId, defaultModel);
+        }
+
         batchJobService.submitJob(jobId);
         
         Job job = jobRepository.findById(jobId).orElseThrow();

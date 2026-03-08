@@ -2,14 +2,18 @@ package org.jh.batchbridge.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.jh.batchbridge.config.AiConfig;
 import org.jh.batchbridge.domain.Chunk;
 import org.jh.batchbridge.domain.Job;
 import org.jh.batchbridge.domain.Result;
@@ -51,11 +55,15 @@ class BatchJobServiceTest {
     @Mock
     private BaseBatchAdapter adapter;
 
+    @Mock
+    private AiConfig aiConfig;
+
     private BatchJobService batchJobService;
 
     @BeforeEach
     void setUp() {
-        batchJobService = new BatchJobService(List.of(csvParser), jobRepository, resultRepository, chunkRepository, tokenEstimator, List.of(adapter));
+        batchJobService = new BatchJobService(List.of(csvParser), jobRepository, resultRepository, chunkRepository, tokenEstimator, List.of(adapter), aiConfig);
+        when(aiConfig.getProviders()).thenReturn(Map.of());
     }
 
     @Test
@@ -84,6 +92,30 @@ class BatchJobServiceTest {
         assertThatThrownBy(() -> batchJobService.createJobFromUpload(txtFile, "claude"))
                 .isInstanceOf(InvalidFileUploadException.class)
                 .hasMessage(ErrorMessage.FILE_FORMAT_UNSUPPORTED);
+    }
+
+    @Test
+    @DisplayName("defaultModel이 claude이면 anthropic 설정 모델이 적용된다")
+    void createJobFromFileResolvesConfiguredDefaultModel() {
+        AiConfig.ProviderConfig anthropicConfig = new AiConfig.ProviderConfig();
+        anthropicConfig.setModel("claude-haiku-4-5");
+
+        when(aiConfig.getProviders()).thenReturn(Map.of("anthropic", anthropicConfig));
+        when(csvParser.supports("test.csv")).thenReturn(true);
+        List<BatchRowDto> rows = List.of(BatchRowDto.builder().id("1").prompt("p1").build());
+        when(csvParser.parse(any(InputStream.class))).thenReturn(rows);
+        when(tokenEstimator.estimateTotalTokens(rows)).thenReturn(100);
+        when(tokenEstimator.estimateCost(100, "claude-haiku-4-5")).thenReturn(0.001d);
+        when(tokenEstimator.resolveBatchLimit("claude-haiku-4-5")).thenReturn(1000);
+        when(tokenEstimator.splitIntoChunks(rows, "claude-haiku-4-5")).thenReturn(List.of(rows));
+        when(jobRepository.save(any(Job.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(chunkRepository.save(any(Chunk.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        Job job = batchJobService.createJobFromFile("test.csv", new ByteArrayInputStream("x".getBytes()), "claude");
+
+        assertThat(job.getModel()).isEqualTo("claude-haiku-4-5");
     }
 
     @Test
