@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
@@ -59,39 +61,49 @@ class BatchJobServiceTest {
     @Mock
     private AiConfig aiConfig;
 
+    @Captor
+    private ArgumentCaptor<List<Result>> resultListCaptor;
+
+    @Captor
+    private ArgumentCaptor<List<BatchRowDto>> batchRowDtoListCaptor;
+
     private BatchJobService batchJobService;
 
     @BeforeEach
     void setUp() {
-        batchJobService = new BatchJobService(List.of(csvParser), jobRepository, resultRepository, chunkRepository, tokenEstimator, List.of(adapter), aiConfig);
+        batchJobService = new BatchJobService(List.of(csvParser), jobRepository, resultRepository,
+            chunkRepository, tokenEstimator, List.of(adapter), aiConfig);
     }
 
     @Test
     @DisplayName("빈 파일을 업로드하면 InvalidFileUploadException이 발생한다")
     void throwExceptionWhenFileIsEmpty() {
-        MockMultipartFile emptyFile = new MockMultipartFile("file", "test.csv", "text/csv", new byte[0]);
+        MockMultipartFile emptyFile = new MockMultipartFile("file", "test.csv", "text/csv",
+            new byte[0]);
         assertThatThrownBy(() -> batchJobService.createJobFromUpload(emptyFile, "claude"))
-                .isInstanceOf(InvalidFileUploadException.class)
-                .hasMessage(ErrorMessage.FILE_EMPTY);
+            .isInstanceOf(InvalidFileUploadException.class)
+            .hasMessage(ErrorMessage.FILE_EMPTY);
     }
 
     @Test
     @DisplayName("파일 이름이 없으면 InvalidFileUploadException이 발생한다")
     void throwExceptionWhenFileNameIsMissing() {
-        MockMultipartFile noNameFile = new MockMultipartFile("file", "", "text/csv", "id,prompt\n1,hello".getBytes());
+        MockMultipartFile noNameFile = new MockMultipartFile("file", "", "text/csv",
+            "id,prompt\n1,hello".getBytes());
         assertThatThrownBy(() -> batchJobService.createJobFromUpload(noNameFile, "claude"))
-                .isInstanceOf(InvalidFileUploadException.class)
-                .hasMessage(ErrorMessage.FILE_NAME_MISSING);
+            .isInstanceOf(InvalidFileUploadException.class)
+            .hasMessage(ErrorMessage.FILE_NAME_MISSING);
     }
 
     @Test
     @DisplayName("지원하지 않는 파일 형식을 업로드하면 InvalidFileUploadException이 발생한다")
     void throwExceptionWhenFileFormatIsUnsupported() {
         when(csvParser.supports("test.txt")).thenReturn(false);
-        MockMultipartFile txtFile = new MockMultipartFile("file", "test.txt", "text/plain", "some content".getBytes());
+        MockMultipartFile txtFile = new MockMultipartFile("file", "test.txt", "text/plain",
+            "some content".getBytes());
         assertThatThrownBy(() -> batchJobService.createJobFromUpload(txtFile, "claude"))
-                .isInstanceOf(InvalidFileUploadException.class)
-                .hasMessage(ErrorMessage.FILE_FORMAT_UNSUPPORTED);
+            .isInstanceOf(InvalidFileUploadException.class)
+            .hasMessage(ErrorMessage.FILE_FORMAT_UNSUPPORTED);
     }
 
     @Test
@@ -102,57 +114,89 @@ class BatchJobServiceTest {
 
         when(aiConfig.getProviders()).thenReturn(Map.of("anthropic", anthropicConfig));
         when(csvParser.supports("test.csv")).thenReturn(true);
-        List<BatchRowDto> rows = List.of(BatchRowDto.builder().id("1").prompt("p1").build());
+        List<BatchRowDto> rows = List.of(BatchRowDto.builder()
+                                                    .id("1")
+                                                    .prompt("p1")
+                                                    .build());
         when(csvParser.parse(any(InputStream.class))).thenReturn(rows);
         when(tokenEstimator.estimateTotalTokens(rows)).thenReturn(100);
         when(tokenEstimator.estimateCost(100, "claude-haiku-4-5")).thenReturn(0.001d);
         when(tokenEstimator.resolveBatchLimit("claude-haiku-4-5")).thenReturn(1000);
         when(tokenEstimator.splitIntoChunks(rows, "claude-haiku-4-5")).thenReturn(List.of(rows));
         when(jobRepository.save(any(Job.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+            .thenAnswer(invocation -> invocation.getArgument(0));
         when(chunkRepository.save(any(Chunk.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
+            .thenAnswer(invocation -> invocation.getArgument(0));
 
-        Job job = batchJobService.createJobFromFile("test.csv", new ByteArrayInputStream("x".getBytes()), "claude");
+        Job job = batchJobService.createJobFromFile("test.csv",
+            new ByteArrayInputStream("x".getBytes()), "claude");
 
         assertThat(job.getModel()).isEqualTo("claude-haiku-4-5");
     }
-
 
     @Test
     @DisplayName("업로드 기본 systemPrompt는 행에 없을 때만 적용된다")
     void createJobFromFileAppliesDefaultSystemPrompt() {
         when(csvParser.supports("test.csv")).thenReturn(true);
         List<BatchRowDto> rows = List.of(
-                BatchRowDto.builder().id("1").prompt("p1").build(),
-                BatchRowDto.builder().id("2").prompt("p2").systemPrompt("row prompt").build()
+            BatchRowDto.builder()
+                       .id("1")
+                       .prompt("p1")
+                       .build(),
+            BatchRowDto.builder()
+                       .id("2")
+                       .prompt("p2")
+                       .systemPrompt("row prompt")
+                       .build()
         );
         when(csvParser.parse(any(InputStream.class))).thenReturn(rows);
         when(tokenEstimator.estimateTotalTokens(anyList())).thenReturn(100);
         when(tokenEstimator.estimateCost(100, "claude-3")).thenReturn(0.001d);
         when(tokenEstimator.resolveBatchLimit("claude-3")).thenReturn(1000);
+
         when(tokenEstimator.splitIntoChunks(anyList(), anyString()))
-                .thenAnswer(invocation -> List.of(invocation.getArgument(0)));
-        when(jobRepository.save(any(Job.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(chunkRepository.save(any(Chunk.class))).thenAnswer(invocation -> invocation.getArgument(0));
+            .thenAnswer(invocation -> {
+                List<BatchRowDto> arg = invocation.getArgument(0);
+                return Collections.singletonList(arg);
+            });
 
-        batchJobService.createJobFromFile("test.csv", new ByteArrayInputStream("x".getBytes()), "claude-3", "default prompt");
+        when(jobRepository.save(any(Job.class))).thenAnswer(
+            invocation -> invocation.getArgument(0));
+        when(chunkRepository.save(any(Chunk.class))).thenAnswer(
+            invocation -> invocation.getArgument(0));
 
-        ArgumentCaptor<List<Result>> resultCaptor = ArgumentCaptor.forClass((Class) List.class);
-        verify(resultRepository).saveAll(resultCaptor.capture());
-        List<Result> savedResults = resultCaptor.getValue();
+        batchJobService.createJobFromFile("test.csv", new ByteArrayInputStream("x".getBytes()),
+            "claude-3", "default prompt");
+
+        verify(resultRepository).saveAll(resultListCaptor.capture());
+        List<Result> savedResults = resultListCaptor.getValue();
+
         assertThat(savedResults).hasSize(2);
-        assertThat(savedResults.get(0).getSystemPrompt()).isEqualTo("default prompt");
-        assertThat(savedResults.get(1).getSystemPrompt()).isEqualTo("row prompt");
+        assertThat(savedResults.get(0)
+                               .getSystemPrompt()).isEqualTo("default prompt");
+        assertThat(savedResults.get(1)
+                               .getSystemPrompt()).isEqualTo("row prompt");
     }
 
     @Test
     @DisplayName("model 컬럼이 있는 행은 해당 모델로 그룹화된다")
     void groupRowsByModelColumn() {
         List<BatchRowDto> rows = List.of(
-                BatchRowDto.builder().id("1").prompt("p1").model("claude").build(),
-                BatchRowDto.builder().id("2").prompt("p2").model("gemini").build(),
-                BatchRowDto.builder().id("3").prompt("p3").model("claude").build()
+            BatchRowDto.builder()
+                       .id("1")
+                       .prompt("p1")
+                       .model("claude")
+                       .build(),
+            BatchRowDto.builder()
+                       .id("2")
+                       .prompt("p2")
+                       .model("gemini")
+                       .build(),
+            BatchRowDto.builder()
+                       .id("3")
+                       .prompt("p3")
+                       .model("claude")
+                       .build()
         );
         Map<String, List<BatchRowDto>> result = batchJobService.groupRowsByModel(rows, "grok");
         assertThat(result).containsOnlyKeys("claude", "gemini");
@@ -164,9 +208,21 @@ class BatchJobServiceTest {
     @DisplayName("model 컬럼이 없는 행은 defaultModel로 그룹화된다")
     void groupRowsWithoutModelUsesDefaultModel() {
         List<BatchRowDto> rows = List.of(
-                BatchRowDto.builder().id("1").prompt("p1").model(null).build(),
-                BatchRowDto.builder().id("2").prompt("p2").model("").build(),
-                BatchRowDto.builder().id("3").prompt("p3").model("gemini").build()
+            BatchRowDto.builder()
+                       .id("1")
+                       .prompt("p1")
+                       .model(null)
+                       .build(),
+            BatchRowDto.builder()
+                       .id("2")
+                       .prompt("p2")
+                       .model("")
+                       .build(),
+            BatchRowDto.builder()
+                       .id("3")
+                       .prompt("p3")
+                       .model("gemini")
+                       .build()
         );
         Map<String, List<BatchRowDto>> result = batchJobService.groupRowsByModel(rows, "claude");
         assertThat(result).containsOnlyKeys("claude", "gemini");
@@ -178,8 +234,14 @@ class BatchJobServiceTest {
     @DisplayName("모든 행에 model 컬럼이 없으면 전체가 defaultModel 그룹으로 묶인다")
     void groupAllRowsToDefaultModelWhenNoModelColumn() {
         List<BatchRowDto> rows = List.of(
-                BatchRowDto.builder().id("1").prompt("p1").build(),
-                BatchRowDto.builder().id("2").prompt("p2").build()
+            BatchRowDto.builder()
+                       .id("1")
+                       .prompt("p1")
+                       .build(),
+            BatchRowDto.builder()
+                       .id("2")
+                       .prompt("p2")
+                       .build()
         );
         Map<String, List<BatchRowDto>> result = batchJobService.groupRowsByModel(rows, "grok");
         assertThat(result).containsOnlyKeys("grok");
@@ -190,10 +252,26 @@ class BatchJobServiceTest {
     @DisplayName("혼합 배치: claude, gemini, grok 행이 각각 올바른 그룹으로 분류된다")
     void groupMixedModelRows() {
         List<BatchRowDto> rows = List.of(
-                BatchRowDto.builder().id("1").prompt("p1").model("claude").build(),
-                BatchRowDto.builder().id("2").prompt("p2").model("gemini").build(),
-                BatchRowDto.builder().id("3").prompt("p3").model("grok").build(),
-                BatchRowDto.builder().id("4").prompt("p4").model(null).build()
+            BatchRowDto.builder()
+                       .id("1")
+                       .prompt("p1")
+                       .model("claude")
+                       .build(),
+            BatchRowDto.builder()
+                       .id("2")
+                       .prompt("p2")
+                       .model("gemini")
+                       .build(),
+            BatchRowDto.builder()
+                       .id("3")
+                       .prompt("p3")
+                       .model("grok")
+                       .build(),
+            BatchRowDto.builder()
+                       .id("4")
+                       .prompt("p4")
+                       .model(null)
+                       .build()
         );
         Map<String, List<BatchRowDto>> result = batchJobService.groupRowsByModel(rows, "claude");
         assertThat(result).containsOnlyKeys("claude", "gemini", "grok");
@@ -201,8 +279,6 @@ class BatchJobServiceTest {
         assertThat(result.get("gemini")).hasSize(1);
         assertThat(result.get("grok")).hasSize(1);
     }
-
-    // ── resolveProvider 테스트 ──────────────────────────────────────────────
 
     @Test
     @DisplayName("claude 모델은 provider가 anthropic이다")
@@ -232,11 +308,26 @@ class BatchJobServiceTest {
     @Test
     @DisplayName("submitJob()은 PENDING 상태인 Job의 Chunk를 제출하고 상태를 업데이트한다")
     void submitJobSuccess() {
-        // ... (이전과 동일한 내용은 생략하고 전체 메서드를 유지하기 위해 그대로 작성)
         Long jobId = 1L;
-        Job job = Job.builder().id(jobId).status(Job.JobStatus.PENDING).build();
-        Chunk chunk = Chunk.builder().id(10L).job(job).provider("anthropic").model("claude-3").status(Chunk.ChunkStatus.CREATED).build();
-        Result result = Result.builder().id(100L).chunk(chunk).job(job).rowIdentifier("row-1").prompt("hello").systemPrompt("be helpful").build();
+        Job job = Job.builder()
+                     .id(jobId)
+                     .status(Job.JobStatus.PENDING)
+                     .build();
+        Chunk chunk = Chunk.builder()
+                           .id(10L)
+                           .job(job)
+                           .provider("anthropic")
+                           .model("claude-3")
+                           .status(Chunk.ChunkStatus.CREATED)
+                           .build();
+        Result result = Result.builder()
+                              .id(100L)
+                              .chunk(chunk)
+                              .job(job)
+                              .rowIdentifier("row-1")
+                              .prompt("hello")
+                              .systemPrompt("be helpful")
+                              .build();
 
         when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
         when(chunkRepository.findByJobId(jobId)).thenReturn(List.of(chunk));
@@ -252,11 +343,11 @@ class BatchJobServiceTest {
         assertThat(chunk.getStatus()).isEqualTo(Chunk.ChunkStatus.SUBMITTED);
         assertThat(job.getStatus()).isEqualTo(Job.JobStatus.PROCESSING);
 
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<BatchRowDto>> rowsCaptor = ArgumentCaptor.forClass((Class) List.class);
-        verify(adapter).submitBatch(rowsCaptor.capture(), anyString());
-        assertThat(rowsCaptor.getValue()).hasSize(1);
-        assertThat(rowsCaptor.getValue().getFirst().getSystemPrompt()).isEqualTo("be helpful");
+        verify(adapter).submitBatch(batchRowDtoListCaptor.capture(), anyString());
+        assertThat(batchRowDtoListCaptor.getValue()).hasSize(1);
+        assertThat(batchRowDtoListCaptor.getValue()
+                                        .getFirst()
+                                        .getSystemPrompt()).isEqualTo("be helpful");
 
         verify(chunkRepository).save(chunk);
         verify(jobRepository).save(job);
@@ -266,23 +357,35 @@ class BatchJobServiceTest {
     @DisplayName("syncUnfinishedJobs()는 SUBMITTED 상태인 청크의 상태를 조회하고 완료 시 결과를 저장한다")
     void syncUnfinishedJobsSuccess() {
         // Given
-        Job job = Job.builder().id(1L).status(Job.JobStatus.PROCESSING).completedRows(0).failedRows(0).build();
+        Job job = Job.builder()
+                     .id(1L)
+                     .status(Job.JobStatus.PROCESSING)
+                     .completedRows(0)
+                     .failedRows(0)
+                     .build();
         Chunk chunk = Chunk.builder()
-                .id(10L)
-                .job(job)
-                .provider("anthropic")
-                .externalBatchId("ext-id-123")
-                .status(Chunk.ChunkStatus.SUBMITTED)
-                .build();
-        Result result = Result.builder().id(100L).chunk(chunk).job(job).rowIdentifier("row-1").status(Result.ResultStatus.PENDING).build();
+                           .id(10L)
+                           .job(job)
+                           .provider("anthropic")
+                           .externalBatchId("ext-id-123")
+                           .status(Chunk.ChunkStatus.SUBMITTED)
+                           .build();
+        Result result = Result.builder()
+                              .id(100L)
+                              .chunk(chunk)
+                              .job(job)
+                              .rowIdentifier("row-1")
+                              .status(Result.ResultStatus.PENDING)
+                              .build();
 
         when(chunkRepository.findByStatus(Chunk.ChunkStatus.SUBMITTED)).thenReturn(List.of(chunk));
         when(adapter.getProvider()).thenReturn("anthropic");
         when(adapter.checkStatus("ext-id-123")).thenReturn(BaseBatchAdapter.BatchStatus.COMPLETED);
         when(adapter.collectResults("ext-id-123")).thenReturn(List.of(
-                BaseBatchAdapter.BatchResultItem.success("row-1", "response text", 10, 20)
+            BaseBatchAdapter.BatchResultItem.success("row-1", "response text", 10, 20)
         ));
-        when(resultRepository.findByChunkIdAndRowIdentifier(10L, "row-1")).thenReturn(Optional.of(result));
+        when(resultRepository.findByChunkIdAndRowIdentifier(10L, "row-1")).thenReturn(
+            Optional.of(result));
         when(chunkRepository.findByJobId(1L)).thenReturn(List.of(chunk));
 
         // When
@@ -305,14 +408,17 @@ class BatchJobServiceTest {
     @DisplayName("syncUnfinishedJobs()는 외부 배치 상태가 FAILED이면 청크 상태를 FAILED로 변경한다")
     void syncUnfinishedJobsFailed() {
         // Given
-        Job job = Job.builder().id(1L).status(Job.JobStatus.PROCESSING).build();
+        Job job = Job.builder()
+                     .id(1L)
+                     .status(Job.JobStatus.PROCESSING)
+                     .build();
         Chunk chunk = Chunk.builder()
-                .id(10L)
-                .job(job)
-                .provider("anthropic")
-                .externalBatchId("ext-id-failed")
-                .status(Chunk.ChunkStatus.SUBMITTED)
-                .build();
+                           .id(10L)
+                           .job(job)
+                           .provider("anthropic")
+                           .externalBatchId("ext-id-failed")
+                           .status(Chunk.ChunkStatus.SUBMITTED)
+                           .build();
 
         when(chunkRepository.findByStatus(Chunk.ChunkStatus.SUBMITTED)).thenReturn(List.of(chunk));
         when(adapter.getProvider()).thenReturn("anthropic");
@@ -335,19 +441,26 @@ class BatchJobServiceTest {
     void getMergedResultsSuccess() {
         // given
         Long jobId = 1L;
-        Job job = Job.builder().id(jobId).name("test-job").build();
-        Chunk chunk = Chunk.builder().id(10L).job(job).model("claude-3-5-sonnet").build();
+        Job job = Job.builder()
+                     .id(jobId)
+                     .name("test-job")
+                     .build();
+        Chunk chunk = Chunk.builder()
+                           .id(10L)
+                           .job(job)
+                           .model("claude-3-5-sonnet")
+                           .build();
         Result result = Result.builder()
-                .id(100L)
-                .rowIdentifier("row-1")
-                .prompt("test prompt")
-                .model("claude-3-5-sonnet")
-                .chunk(chunk)
-                .resultText("result text")
-                .status(Result.ResultStatus.SUCCESS)
-                .inputTokens(10)
-                .outputTokens(20)
-                .build();
+                              .id(100L)
+                              .rowIdentifier("row-1")
+                              .prompt("test prompt")
+                              .model("claude-3-5-sonnet")
+                              .chunk(chunk)
+                              .resultText("result text")
+                              .status(Result.ResultStatus.SUCCESS)
+                              .inputTokens(10)
+                              .outputTokens(20)
+                              .build();
 
         when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
         when(resultRepository.findByJobId(jobId)).thenReturn(List.of(result));
@@ -373,27 +486,34 @@ class BatchJobServiceTest {
     void exportFailedRowsToCsvSuccess() {
         // given
         Long jobId = 1L;
-        Job job = Job.builder().id(jobId).name("test-job").build();
-        Chunk chunk = Chunk.builder().id(10L).job(job).model("claude-3-5-sonnet").build();
+        Job job = Job.builder()
+                     .id(jobId)
+                     .name("test-job")
+                     .build();
+        Chunk chunk = Chunk.builder()
+                           .id(10L)
+                           .job(job)
+                           .model("claude-3-5-sonnet")
+                           .build();
         Result successResult = Result.builder()
-                .id(101L)
-                .rowIdentifier("row-success")
-                .prompt("success prompt")
-                .model("claude-3-5-sonnet")
-                .chunk(chunk)
-                .resultText("result text")
-                .status(Result.ResultStatus.SUCCESS)
-                .build();
+                                     .id(101L)
+                                     .rowIdentifier("row-success")
+                                     .prompt("success prompt")
+                                     .model("claude-3-5-sonnet")
+                                     .chunk(chunk)
+                                     .resultText("result text")
+                                     .status(Result.ResultStatus.SUCCESS)
+                                     .build();
         Result failResult = Result.builder()
-                .id(102L)
-                .rowIdentifier("row-fail")
-                .prompt("fail prompt")
-                .model("claude-3-5-sonnet")
-                .chunk(chunk)
-                .resultText(null)
-                .status(Result.ResultStatus.FAIL)
-                .errorMessage("some error")
-                .build();
+                                  .id(102L)
+                                  .rowIdentifier("row-fail")
+                                  .prompt("fail prompt")
+                                  .model("claude-3-5-sonnet")
+                                  .chunk(chunk)
+                                  .resultText(null)
+                                  .status(Result.ResultStatus.FAIL)
+                                  .errorMessage("some error")
+                                  .build();
 
         when(jobRepository.findById(jobId)).thenReturn(Optional.of(job));
         when(resultRepository.findByJobId(jobId)).thenReturn(List.of(successResult, failResult));
@@ -405,8 +525,10 @@ class BatchJobServiceTest {
         // then
         String[] lines = csvContent.split("\n");
         assertThat(lines).hasSize(2); // Header + 1 Fail Row
-        assertThat(lines[0]).contains("row_id", "custom_id", "prompt", "result", "model", "input_tokens", "output_tokens", "status");
-        assertThat(lines[1]).contains("102", "row-fail", "fail prompt", "claude-3-5-sonnet", "FAIL");
+        assertThat(lines[0]).contains("row_id", "custom_id", "prompt", "result", "model",
+            "input_tokens", "output_tokens", "status");
+        assertThat(lines[1]).contains("102", "row-fail", "fail prompt", "claude-3-5-sonnet",
+            "FAIL");
         assertThat(csvContent).doesNotContain("row-success");
     }
 }
