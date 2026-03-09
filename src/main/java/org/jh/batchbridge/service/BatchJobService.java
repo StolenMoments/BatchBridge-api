@@ -77,24 +77,36 @@ public class BatchJobService {
         return internalCreateJobFromFile(fileName, inputStream, defaultModel, defaultSystemPrompt);
     }
 
-    private Job internalCreateJobFromFile(String fileName, InputStream inputStream, String defaultModel, String defaultSystemPrompt) {
-        String resolvedDefaultModel = resolveConfiguredModel(defaultModel);
+    @Transactional
+    public Job createJobFromRows(String jobName, List<BatchRowDto> rows, String defaultModel, String defaultSystemPrompt) {
+        if (rows == null || rows.isEmpty()) {
+            throw new IllegalArgumentException("rows must not be empty");
+        }
 
+        return internalCreateJobFromRows(jobName, rows, defaultModel, defaultSystemPrompt);
+    }
+
+    private Job internalCreateJobFromFile(String fileName, InputStream inputStream, String defaultModel, String defaultSystemPrompt) {
         BatchFileParser parser = parsers.stream()
                                         .filter(p -> p.supports(fileName))
                                         .findFirst()
                                         .orElseThrow(() -> new InvalidFileUploadException(ErrorMessage.FILE_FORMAT_UNSUPPORTED));
 
         List<BatchRowDto> rows = parser.parse(inputStream);
+        return internalCreateJobFromRows(fileName, rows, defaultModel, defaultSystemPrompt);
+    }
+
+    private Job internalCreateJobFromRows(String jobName, List<BatchRowDto> rows, String defaultModel, String defaultSystemPrompt) {
+        String resolvedDefaultModel = resolveConfiguredModel(defaultModel);
         List<BatchRowDto> resolvedRows = applyDefaultSystemPrompt(rows, defaultSystemPrompt);
 
         int totalTokens = tokenEstimator.estimateTotalTokens(resolvedRows);
         double estimatedCost = tokenEstimator.estimateCost(totalTokens, resolvedDefaultModel);
         log.info("[TokenEstimate] file={}, rows={}, estimatedInputTokens={}, model={}, estimatedCost=${}",
-            fileName, resolvedRows.size(), totalTokens, resolvedDefaultModel, String.format("%.6f", estimatedCost));
+            jobName, resolvedRows.size(), totalTokens, resolvedDefaultModel, String.format("%.6f", estimatedCost));
 
         Job job = Job.builder()
-                     .name(fileName)
+                     .name(jobName)
                      .status(Job.JobStatus.PENDING)
                      .model(resolvedDefaultModel)
                      .totalRows(resolvedRows.size())

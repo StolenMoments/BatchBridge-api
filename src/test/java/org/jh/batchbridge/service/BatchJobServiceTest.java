@@ -178,6 +178,34 @@ class BatchJobServiceTest {
                                .getSystemPrompt()).isEqualTo("row prompt");
     }
 
+
+    @Test
+    @DisplayName("테이블 행으로 Job 생성 시 행 데이터가 저장된다")
+    void createJobFromRows() {
+        List<BatchRowDto> rows = List.of(
+            BatchRowDto.builder().id("1").prompt("p1").build(),
+            BatchRowDto.builder().id("2").prompt("p2").build()
+        );
+
+        when(tokenEstimator.estimateTotalTokens(anyList())).thenReturn(100);
+        when(tokenEstimator.estimateCost(100, "claude-3")).thenReturn(0.001d);
+        when(tokenEstimator.resolveBatchLimit("claude-3")).thenReturn(1000);
+        when(tokenEstimator.splitIntoChunks(anyList(), anyString()))
+            .thenAnswer(invocation -> Collections.singletonList(invocation.getArgument(0)));
+        when(jobRepository.save(any(Job.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(chunkRepository.save(any(Chunk.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Job job = batchJobService.createJobFromRows("table-input", rows, "claude-3", "default prompt");
+
+        verify(resultRepository).saveAll(resultListCaptor.capture());
+        List<Result> savedResults = resultListCaptor.getValue();
+
+        assertThat(job.getName()).isEqualTo("table-input");
+        assertThat(job.getTotalRows()).isEqualTo(2);
+        assertThat(savedResults).hasSize(2);
+        assertThat(savedResults.get(0).getSystemPrompt()).isEqualTo("default prompt");
+    }
+
     @Test
     @DisplayName("model 컬럼이 있는 행은 해당 모델로 그룹화된다")
     void groupRowsByModelColumn() {
