@@ -11,6 +11,7 @@ import org.jh.batchbridge.dto.BatchRowDto;
 import org.jh.batchbridge.dto.api.ApiResponse;
 import org.jh.batchbridge.dto.api.BatchSubmitResponse;
 import org.jh.batchbridge.dto.api.UploadResponse;
+import org.jh.batchbridge.dto.api.TableUploadRequest;
 import org.jh.batchbridge.repository.JobRepository;
 import org.jh.batchbridge.service.BatchJobService;
 import org.jh.batchbridge.service.TokenEstimator;
@@ -69,6 +70,50 @@ public class BatchController {
         UploadResponse response = UploadResponse.builder()
                 .uploadId(job.getId().toString())
                 .filename(file.getOriginalFilename())
+                .totalRows(rows.size())
+                .columns(Arrays.asList("custom_id", "prompt", "model", "system_prompt"))
+                .preview(rows.stream().limit(5).toList())
+                .estimatedTokens(estimatedTokens)
+                .estimatedCost(estimatedCosts)
+                .build();
+
+        return ApiResponse.success(response);
+    }
+
+
+    @PostMapping("/upload/table")
+    public ApiResponse<UploadResponse> uploadTableRows(@RequestBody TableUploadRequest request) {
+        List<BatchRowDto> rows = request.getRows();
+        if (rows == null || rows.isEmpty()) {
+            throw new IllegalArgumentException("rows must not be empty");
+        }
+
+        String defaultModel = request.getDefaultModel();
+        String filename = request.getFilename() == null || request.getFilename().isBlank()
+                ? "table-input"
+                : request.getFilename();
+
+        Job job = batchJobService.createJobFromRows(filename, rows, defaultModel, request.getSystemPrompt());
+
+        Map<String, List<BatchRowDto>> grouped = batchJobService.groupRowsByModel(rows, defaultModel);
+
+        Map<String, Integer> estimatedTokens = new HashMap<>();
+        Map<String, Double> estimatedCosts = new HashMap<>();
+        double totalCost = 0;
+
+        for (Map.Entry<String, List<BatchRowDto>> entry : grouped.entrySet()) {
+            String model = entry.getKey();
+            int tokens = tokenEstimator.estimateTotalTokens(entry.getValue());
+            double cost = tokenEstimator.estimateCost(tokens, model);
+            estimatedTokens.put(model, tokens);
+            estimatedCosts.put(model, cost);
+            totalCost += cost;
+        }
+        estimatedCosts.put("total", totalCost);
+
+        UploadResponse response = UploadResponse.builder()
+                .uploadId(job.getId().toString())
+                .filename(filename)
                 .totalRows(rows.size())
                 .columns(Arrays.asList("custom_id", "prompt", "model", "system_prompt"))
                 .preview(rows.stream().limit(5).toList())
